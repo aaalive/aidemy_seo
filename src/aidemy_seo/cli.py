@@ -57,10 +57,17 @@ def _description(a: argparse.Namespace) -> Result:
 
 def _schedule(a: argparse.Namespace) -> Result:
     from .aidemy_pub import load_channel_videos
-    from .schedule import best_slots
+    from .schedule import best_slots, metric_coverage
 
-    slots = best_slots(load_channel_videos(a.stats_json), tz=a.tz, metric=a.metric, min_videos=a.min_videos)
-    lines = [f"{'slot':<10} {'videos':>6} {'median':>8}  note"]
+    videos = load_channel_videos(a.stats_json)
+    slots = best_slots(videos, tz=a.tz, metric=a.metric, min_videos=a.min_videos, fallback_metric=a.fallback_metric)
+    have, total = metric_coverage(videos, a.metric)
+    used = f"{have} of {total} Shorts have {a.metric}" + (
+        f"; the rest use {a.fallback_metric} (older videos look better)"
+        if a.fallback_metric
+        else "; the rest are left out"
+    )
+    lines = [used, f"{'slot':<10} {'videos':>6} {'median':>8}  note"]
     lines += [
         f"{x.label:<10} {x.videos:>6} {x.median_views:>8}  {'' if x.enough_data else 'not enough data'}" for x in slots
     ]
@@ -217,6 +224,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("schedule", help="best posting slots from a stats JSON (aidemy_pub state/youtube/stats.json)")
     s.add_argument("stats_json")
     s.add_argument("--metric", default="views_24h")
+    s.add_argument(
+        "--fallback-metric",
+        default=None,
+        help="use this metric for videos without --metric (e.g. views); off by default - it favours older videos",
+    )
     s.add_argument("--min-videos", type=int, default=3)
     s.add_argument("--tz", default="Europe/Berlin")
 

@@ -16,6 +16,7 @@ from aidemy_seo import (
     calibrate,
     candidates,
     feature_lift,
+    metric_coverage,
     optimize_title,
     rank,
     score_title,
@@ -187,6 +188,25 @@ def test_best_slots_ranks_by_median_and_flags_thin_data():
     assert slots[0].label == "Tue 15:00" and slots[0].enough_data and slots[0].videos == 3
     assert all(s.label != "Wed 10:00" for s in slots)  # long video excluded by default
     assert not next(s for s in slots if s.label == "Wed 19:00").enough_data
+
+
+def test_best_slots_never_falls_back_to_total_views_silently():
+    # Real case (2026-11-13, her stats.json): `schedule --metric views_24h` ranked "Fri 22:00 = 205"
+    # from TOTAL views of 3-week-old videos, because only 5 of 78 had views_24h.
+    old = [
+        {"kind": "short", "went_public_at": "2026-10-23T21:00:00Z", "views": 205, "views_24h": None},
+        {"kind": "short", "went_public_at": "2026-10-23T21:05:00Z", "views": 210},
+    ]
+    new = [{"kind": "short", "went_public_at": "2026-11-12T13:00:00Z", "views": 30, "views_24h": 25.7}]
+    slots = best_slots(old + new, min_videos=1)
+    assert [(s.label, s.median_views) for s in slots] == [("Thu 14:00", 25.7)]
+    assert metric_coverage(old + new, "views_24h") == (1, 3)
+
+
+def test_best_slots_fallback_only_when_asked():
+    old = [{"kind": "short", "went_public_at": "2026-10-23T21:00:00Z", "views": 205}]
+    assert best_slots(old, min_videos=1, fallback_metric="views")[0].median_views == 205
+    assert best_hours(old, fallback_metric="views")[0][1] == 205 and best_hours(old) == []
 
 
 def test_best_hours():

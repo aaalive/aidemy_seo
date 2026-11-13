@@ -1,7 +1,9 @@
 """Best posting times from your own channel's real numbers.
 
 Input: one record per video with when it went public and how it did after a fixed window
-(``views_24h`` is the fairest comparison; ``views`` is used when nothing else exists).
+(``views_24h`` is the fairest comparison). A video without the chosen metric is left out -
+never silently replaced by its total ``views``, which favours older videos (a 3-week-old
+video has had 3 weeks to collect them). Pass ``fallback_metric="views"`` to opt in.
 Groups by weekday + hour (local time), ranks by median, and says how sure it is: a slot
 with fewer than `min_videos` uploads is reported but marked "not enough data".
 """
@@ -44,6 +46,7 @@ def best_slots(
     metric: str = "views_24h",
     min_videos: int = 3,
     shorts_only: bool = True,
+    fallback_metric: str | None = None,
 ) -> list[Slot]:
     zone = ZoneInfo(tz)
     groups: dict[tuple[int, int], list[float]] = {}
@@ -52,8 +55,8 @@ def best_slots(
             continue
         when = _parse(v.get("went_public_at") or v.get("published_at") or v.get("publish_at") or "")
         val = v.get(metric)
-        if val is None and metric != "views":
-            val = v.get("views")
+        if val is None and fallback_metric:
+            val = v.get(fallback_metric)
         if when is None or val is None:
             continue
         if when.tzinfo is None:
@@ -70,15 +73,24 @@ def best_slots(
     return slots
 
 
+def metric_coverage(videos: list[dict], metric: str, *, shorts_only: bool = True) -> tuple[int, int]:
+    """(videos that have `metric`, videos considered) - shown next to every ranking."""
+    pool = [v for v in videos if not shorts_only or "short" in str(v.get("kind", "short"))]
+    return sum(1 for v in pool if v.get(metric) is not None), len(pool)
+
+
 def best_hours(videos: list[dict], **kw) -> list[tuple[int, float, int]]:
     """Weekday-independent view: (hour, median, n), best first - useful with little data."""
     tz = kw.pop("tz", "Europe/Berlin")
     metric = kw.pop("metric", "views_24h")
+    fallback_metric = kw.pop("fallback_metric", None)
     zone = ZoneInfo(tz)
     groups: dict[int, list[float]] = {}
     for v in videos:
         when = _parse(v.get("went_public_at") or v.get("published_at") or "")
-        val = v.get(metric, v.get("views"))
+        val = v.get(metric)
+        if val is None and fallback_metric:
+            val = v.get(fallback_metric)
         if when is None or val is None:
             continue
         if when.tzinfo is None:

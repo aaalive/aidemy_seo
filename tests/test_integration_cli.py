@@ -70,7 +70,9 @@ def test_description_from_file_and_stdin(capsys, tmp_path, monkeypatch):
 
 def test_schedule_and_learn_on_stats(capsys):
     out = run(capsys, "schedule", STATS)
-    assert out.splitlines()[1].startswith(("Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"))
+    lines = out.splitlines()
+    assert lines[0] == "12 of 12 Shorts have views_24h; the rest are left out"  # coverage is always shown
+    assert lines[2].startswith(("Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"))
     out = run(capsys, "learn", STATS, "--metric", "views_24h")
     assert "question" in out and "helps" in out
 
