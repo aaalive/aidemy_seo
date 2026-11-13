@@ -1,0 +1,12 @@
+# German school-education channels to compare with (one handle, channel id or URL per line).
+# Starting suggestions - the handles are NOT verified; `aidemy-seo channels` reports any it
+# cannot find. Use `aidemy-seo channels --discover "Biologie Klasse 10"` to find more.
+@simpleclub
+@MrWissen2go
+@musstewissenDeutsch
+@musstewissenGeschichte
+@Lehrerschmidt
+@MathebyDanielJung
+@sofatutor
+@TheSimpleBiology
+@TheSimpleChemics
