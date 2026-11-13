@@ -8,12 +8,13 @@ niche curriculum words get 0-2, everyday search terms 8-10.
 Every network call goes through a ``fetch`` callable, so tests and offline runs inject
 recorded responses, and a failed lookup is reported as -1 ("unknown"), never 0.
 """
+
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Optional
 
 from .text import fold, stems
 
@@ -23,15 +24,43 @@ AUTOCOMPLETE_URL = "https://suggestqueries.google.com/complete/search"
 Fetch = Callable[[str, dict], object]
 
 GENERIC_WORDS = {
-    "nutzen", "risiken", "bedeutung", "grundlagen", "merkmale", "moglichkeiten", "formen", "arten",
-    "beispiele", "einfuhrung", "uberblick", "vergleich", "ursachen", "folgen", "aufbau", "funktion",
-    "entwicklung", "probleme", "chancen", "gefahren", "eigenschaften", "methoden", "regeln", "begriffe",
-    "definition", "bedingungen", "aufgaben", "ubungen", "wirklichkeit", "material", "arbeitsblatt",
+    "nutzen",
+    "risiken",
+    "bedeutung",
+    "grundlagen",
+    "merkmale",
+    "moglichkeiten",
+    "formen",
+    "arten",
+    "beispiele",
+    "einfuhrung",
+    "uberblick",
+    "vergleich",
+    "ursachen",
+    "folgen",
+    "aufbau",
+    "funktion",
+    "entwicklung",
+    "probleme",
+    "chancen",
+    "gefahren",
+    "eigenschaften",
+    "methoden",
+    "regeln",
+    "begriffe",
+    "definition",
+    "bedingungen",
+    "aufgaben",
+    "ubungen",
+    "wirklichkeit",
+    "material",
+    "arbeitsblatt",
 }
 
 
 def requests_fetch(url: str, params: dict, timeout: float = 3.0) -> object:
     import requests  # optional dependency: pip install aidemy-seo[http]
+
     r = requests.get(url, params=params, timeout=timeout)
     r.raise_for_status()
     try:
@@ -43,18 +72,20 @@ def requests_fetch(url: str, params: dict, timeout: float = 3.0) -> object:
 @dataclass
 class Autocomplete:
     """YouTube autocomplete with an in-memory cache."""
-    fetch: Fetch = requests_fetch
+
+    fetch: Fetch | None = None  # None = live HTTP via requests_fetch, resolved at call time
     lang: str = "de"
     region: str = "DE"
     _cache: dict = field(default_factory=dict)
 
-    def suggestions(self, phrase: str) -> Optional[list[str]]:
+    def suggestions(self, phrase: str) -> list[str] | None:
         key = (fold(phrase).strip(), self.lang, self.region)
         if key in self._cache:
             return self._cache[key]
         try:
-            data = self.fetch(AUTOCOMPLETE_URL, {"client": "firefox", "ds": "yt", "hl": self.lang,
-                                                 "gl": self.region, "q": phrase})
+            data = (self.fetch or requests_fetch)(
+                AUTOCOMPLETE_URL, {"client": "firefox", "ds": "yt", "hl": self.lang, "gl": self.region, "q": phrase}
+            )
         except Exception:  # noqa: BLE001 - offline / blocked: unknown, not zero
             return None
         sugg = data[1] if isinstance(data, list) and len(data) > 1 and isinstance(data[1], list) else None
@@ -82,16 +113,17 @@ class Autocomplete:
 @dataclass
 class Keyword:
     phrase: str
-    demand: int            # 0-10, -1 unknown
-    main: bool             # named in the topic itself / its short name
+    demand: int  # 0-10, -1 unknown
+    main: bool  # named in the topic itself / its short name
     score: float = 0.0
 
 
 _SPLIT = re.compile(r"\s*(?:,|;|:|–|—|\s-\s|\(|\)|/|\bsowie\b)\s*")
 
 
-def candidates(topic: str, *, short_name: str = "", key_terms: Iterable[str] = (),
-               max_words: int = 3) -> list[tuple[str, bool]]:
+def candidates(
+    topic: str, *, short_name: str = "", key_terms: Iterable[str] = (), max_words: int = 3
+) -> list[tuple[str, bool]]:
     """Keyword candidates for a lesson, ``(phrase, is_main)``.
 
     Only words that belong to the lesson: a candidate's stems must all appear in the topic or

@@ -9,6 +9,7 @@ learn from your own channel's views with `aidemy_seo.learn`.
 `optimize_title()` builds candidates from honest templates around the best keyword and
 returns them ranked. Templates never claim a fact the video does not contain.
 """
+
 from __future__ import annotations
 
 import re
@@ -17,16 +18,58 @@ from dataclasses import dataclass, field
 from .text import fold, hashtags, strip_hashtags, words
 
 EMOTION_WORDS = {
-    "endlich", "einfach", "wirklich", "geheimnis", "fehler", "irrtum", "trick", "unglaublich",
-    "überraschend", "uberraschend", "wichtig", "sofort", "schnell", "verstehen", "verstanden",
-    "musst", "wissen", "klar", "achtung", "falle", "mythos", "wahrheit", "simple", "easy",
-    "secret", "mistake", "finally", "really",
+    "endlich",
+    "einfach",
+    "wirklich",
+    "geheimnis",
+    "fehler",
+    "irrtum",
+    "trick",
+    "unglaublich",
+    "überraschend",
+    "uberraschend",
+    "wichtig",
+    "sofort",
+    "schnell",
+    "verstehen",
+    "verstanden",
+    "musst",
+    "wissen",
+    "klar",
+    "achtung",
+    "falle",
+    "mythos",
+    "wahrheit",
+    "simple",
+    "easy",
+    "secret",
+    "mistake",
+    "finally",
+    "really",
 }
 DIRECT_ADDRESS = {"du", "dir", "dich", "dein", "deine", "deinen", "you", "your"}
-QUESTION_WORDS = {"warum", "wieso", "weshalb", "wie", "was", "wer", "welche", "welcher", "kannst",
-                  "schaffst", "weisst", "why", "how", "what", "can"}
-LISTING_RE = re.compile(r"\b(Kl\.?\s*\d+|Klasse\s*\d+\s*:|Arbeitsblatt|Lernzettel|Set|Paket|Material|"
-                        r"Klassenarbeit(?:en)?|PDF)\b", re.I)
+QUESTION_WORDS = {
+    "warum",
+    "wieso",
+    "weshalb",
+    "wie",
+    "was",
+    "wer",
+    "welche",
+    "welcher",
+    "kannst",
+    "schaffst",
+    "weisst",
+    "why",
+    "how",
+    "what",
+    "can",
+}
+LISTING_RE = re.compile(
+    r"\b(Kl\.?\s*\d+|Klasse\s*\d+\s*:|Arbeitsblatt|Lernzettel|Set|Paket|Material|"
+    r"Klassenarbeit(?:en)?|PDF)\b",
+    re.I,
+)
 
 TEMPLATES = (
     "{x} – kannst du es erklären?",
@@ -41,8 +84,8 @@ TEMPLATES = (
 @dataclass
 class TitleScore:
     title: str
-    total: float                      # 0-100
-    checks: dict = field(default_factory=dict)   # name -> (passed, weight, note)
+    total: float  # 0-100
+    checks: dict = field(default_factory=dict)  # name -> (passed, weight, note)
 
     @property
     def issues(self) -> list[str]:
@@ -59,15 +102,22 @@ def score_title(title: str, keyword: str = "", *, max_len: int = 66, ideal: tupl
     def add(name, ok, weight, note):
         checks[name] = (bool(ok), weight, note)
 
-    add("length", ideal[0] <= len(core) <= ideal[1] and n <= max_len, 15,
-        f"{len(core)} characters without hashtags (aim {ideal[0]}-{ideal[1]}, total <= {max_len})")
+    add(
+        "length",
+        ideal[0] <= len(core) <= ideal[1] and n <= max_len,
+        15,
+        f"{len(core)} characters without hashtags (aim {ideal[0]}-{ideal[1]}, total <= {max_len})",
+    )
     if keyword:
         first = fold(keyword.split(" & ")[0])
         add("keyword_first", fold(core).startswith(first), 20, f"start with the searched keyword '{keyword}'")
-        add("keyword_present", all(w in ws for w in words(keyword.split(" & ")[0])), 10,
-            f"contains '{keyword}'")
-    add("hook", "?" in core or ws & QUESTION_WORDS or ws & DIRECT_ADDRESS, 15,
-        "a question or direct address ('du', 'kannst du ...?')")
+        add("keyword_present", all(w in ws for w in words(keyword.split(" & ")[0])), 10, f"contains '{keyword}'")
+    add(
+        "hook",
+        "?" in core or ws & QUESTION_WORDS or ws & DIRECT_ADDRESS,
+        15,
+        "a question or direct address ('du', 'kannst du ...?')",
+    )
     add("emotion", ws & EMOTION_WORDS or "!" in core, 10, "an honest emotional word ('endlich', 'einfach', '!')")
     add("not_a_listing", not LISTING_RE.search(core), 15, "reads like a hook, not a shop label ('Kl. 6: ... Set')")
     tags = hashtags(title)
@@ -81,14 +131,20 @@ def score_title(title: str, keyword: str = "", *, max_len: int = 66, ideal: tupl
 
 def build_title(keyword: str, template: str, tags: list[str], max_len: int = 66) -> str:
     hook = template.format(x=keyword)
-    tagstr = " ".join(tags)
     while tags and len(hook) + 1 + len(" ".join(tags)) > max_len:
         tags = tags[:-1]
     return (hook + (" " + " ".join(tags) if tags else "")).strip()
 
 
-def optimize_title(keyword: str, *, subject: str = "", grade: str = "", max_len: int = 66,
-                   templates: tuple = TEMPLATES, weights: dict | None = None) -> list[TitleScore]:
+def optimize_title(
+    keyword: str,
+    *,
+    subject: str = "",
+    grade: str = "",
+    max_len: int = 66,
+    templates: tuple = TEMPLATES,
+    weights: dict | None = None,
+) -> list[TitleScore]:
     """Ranked title candidates for `keyword`. `weights` (template -> bonus 0-1) comes from
     calibration / learning; without it the checklist alone ranks them."""
     tags = []
@@ -109,7 +165,7 @@ def optimize_title(keyword: str, *, subject: str = "", grade: str = "", max_len:
             kept_all = all(tag in t for tag in tags)
             s.checks["all_hashtags"] = (kept_all, 0, "subject and grade hashtags both fit")
             if not kept_all:
-                s.total = round(s.total - 15.0, 1)   # a shorter template that keeps #Fach #KlasseN wins
+                s.total = round(s.total - 15.0, 1)  # a shorter template that keeps #Fach #KlasseN wins
             if weights:
                 s.total = round(s.total + 10.0 * weights.get(tpl, 0.0), 1)
             s.checks["template"] = (True, 0, tpl)
@@ -126,6 +182,7 @@ def calibrate(observed: list[tuple[str, float]]) -> dict:
     """Which title shapes score best with an external tool (e.g. vidIQ scores you saw).
     Returns {"by_shape": {shape: mean score}, "n": ...}. Shapes: question, must_know,
     einfach_erklaert, label, other."""
+
     def shape(t: str) -> str:
         c = fold(strip_hashtags(t))
         if "?" in c:
@@ -137,8 +194,11 @@ def calibrate(observed: list[tuple[str, float]]) -> dict:
         if not re.search(r"[!?]", c):
             return "label"
         return "other"
+
     groups: dict[str, list[float]] = {}
     for title, sc in observed:
         groups.setdefault(shape(title), []).append(float(sc))
-    return {"by_shape": {k: round(sum(v) / len(v), 1) for k, v in sorted(groups.items())},
-            "n": {k: len(v) for k, v in groups.items()}}
+    return {
+        "by_shape": {k: round(sum(v) / len(v), 1) for k, v in sorted(groups.items())},
+        "n": {k: len(v) for k, v in groups.items()},
+    }

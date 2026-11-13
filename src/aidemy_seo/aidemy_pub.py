@@ -4,6 +4,7 @@ aidemy_pub keeps the channel snapshot in ``state/youtube/stats.json`` (written e
 its youtube-stats job) and one ``bundle.json`` per lesson. These helpers read them, so
 aidemy_seo never needs its own YouTube login for the analytics part.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,8 +22,13 @@ def load_channel_videos(stats_json: str | Path) -> list[dict]:
 def lesson_keyword_inputs(bundle: dict) -> dict:
     meta = bundle.get("meta") or {}
     terms = [k.get("term") if isinstance(k, dict) else k for k in bundle.get("keyTerms") or []]
-    return {"topic": meta.get("topic", ""), "short_name": (bundle.get("overview") or {}).get("topicShortName", ""),
-            "key_terms": [t for t in terms if t], "subject": meta.get("subject", ""), "grade": meta.get("grade", "")}
+    return {
+        "topic": meta.get("topic", ""),
+        "short_name": (bundle.get("overview") or {}).get("topicShortName", ""),
+        "key_terms": [t for t in terms if t],
+        "subject": meta.get("subject", ""),
+        "grade": meta.get("grade", ""),
+    }
 
 
 def suggest_for_lesson(bundle: dict, *, autocomplete: Autocomplete | None = None, top: int = 5) -> dict:
@@ -33,6 +39,8 @@ def suggest_for_lesson(bundle: dict, *, autocomplete: Autocomplete | None = None
     ranked = rank(cands, ac.demand)
     kw = best_title_keyword(ranked) or (cands[0][0] if cands else inp["topic"])
     titles = optimize_title(kw, subject=inp["subject"], grade=inp["grade"])
-    return {"keyword": kw,
-            "keywords": [{"phrase": k.phrase, "demand": k.demand, "main": k.main, "score": k.score} for k in ranked],
-            "titles": [{"title": t.title, "score": t.total, "issues": t.issues} for t in titles[:top]]}
+    return {
+        "keyword": kw,
+        "keywords": [{"phrase": k.phrase, "demand": k.demand, "main": k.main, "score": k.score} for k in ranked],
+        "titles": [{"title": t.title, "score": t.total, "issues": t.issues} for t in titles[:top]],
+    }

@@ -14,7 +14,7 @@ dependencies = []          # core is pure standard library
 
 [project.optional-dependencies]
 http = ["requests>=2.28"]  # live YouTube autocomplete / Data API calls
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.10", "mutmut>=3", "pre-commit>=3"]
 
 [project.scripts]
 aidemy-seo = "aidemy_seo.cli:main"
@@ -24,3 +24,41 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["live: calls the real YouTube APIs (network, and a key for the Data API) - opt-in: pytest -m live"]
+addopts = "-m 'not live'"
+
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "S", "BLE", "RUF"]
+ignore = ["S101", "RUF001", "RUF002", "RUF003", "E731"]   # asserts in tests; German dashes/quotes are intended
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B", "E501"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src/aidemy_seo"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["aidemy_seo"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+
+[tool.mutmut]
+paths_to_mutate = ["src/aidemy_seo/"]
+tests_dir = ["tests/"]
+also_copy = ["specs/", "examples/"]

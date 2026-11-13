@@ -5,11 +5,12 @@ WITH it against videos WITHOUT it, and only call it a finding when both groups h
 `min_group` videos. With a young channel most features will say "not enough data" - that is
 the correct answer, not a bug.
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from statistics import median
-from typing import Callable
 
 from .text import fold, hashtags, strip_hashtags, words
 from .titles import DIRECT_ADDRESS, EMOTION_WORDS, QUESTION_WORDS
@@ -33,20 +34,20 @@ class Finding:
     without_n: int
     with_median: float
     without_median: float
-    lift: float | None          # with / without, None when not enough data
+    lift: float | None  # with / without, None when not enough data
     verdict: str
 
 
 def feature_lift(videos: list[dict], *, metric: str = "views", min_group: int = 5) -> list[Finding]:
-    rows = [(v.get("title", ""), v.get(metric)) for v in videos if v.get(metric) is not None]
+    rows = [(str(v.get("title", "")), float(v[metric])) for v in videos if v.get(metric) is not None]
     out = []
     for name, f in FEATURES.items():
-        yes = [float(m) for t, m in rows if f(t)]
-        no = [float(m) for t, m in rows if not f(t)]
+        yes = [m for t, m in rows if f(t)]
+        no = [m for t, m in rows if not f(t)]
         if len(yes) >= min_group and len(no) >= min_group:
             my, mn = median(yes), median(no)
             lift = round(my / mn, 2) if mn > 0 else None
-            verdict = ("helps" if lift and lift >= 1.2 else "hurts" if lift and lift <= 0.8 else "no clear effect")
+            verdict = "helps" if lift and lift >= 1.2 else "hurts" if lift and lift <= 0.8 else "no clear effect"
         else:
             my = median(yes) if yes else 0.0
             mn = median(no) if no else 0.0

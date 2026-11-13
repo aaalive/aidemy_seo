@@ -3,6 +3,7 @@
 Works on any list of (title, views) pairs - from `YouTubeAPI.top_videos()`, a CSV export,
 or your own channel - so the analysis itself needs no network and is easy to test.
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -24,16 +25,18 @@ class Patterns:
     share_hashtag: float
     share_emoji: float
     top_words: list = field(default_factory=list)
-    weighted_top_words: list = field(default_factory=list)   # weighted by views
+    weighted_top_words: list = field(default_factory=list)  # weighted by views
 
     def summary(self) -> list[str]:
-        p = lambda x: f"{round(100 * x)}%"  # noqa: E731
-        return [f"{self.n} titles, median length {self.median_len:.0f} characters",
-                f"questions {p(self.share_question)}, numbers {p(self.share_number)}, "
-                f"'du/you' {p(self.share_direct_address)}, keyword first {p(self.share_keyword_first)}",
-                f"hashtags in title {p(self.share_hashtag)}, emoji {p(self.share_emoji)}",
-                "most used words: " + ", ".join(w for w, _ in self.top_words[:12]),
-                "words in the most-viewed titles: " + ", ".join(w for w, _ in self.weighted_top_words[:12])]
+        p = lambda x: f"{round(100 * x)}%"
+        return [
+            f"{self.n} titles, median length {self.median_len:.0f} characters",
+            f"questions {p(self.share_question)}, numbers {p(self.share_number)}, "
+            f"'du/you' {p(self.share_direct_address)}, keyword first {p(self.share_keyword_first)}",
+            f"hashtags in title {p(self.share_hashtag)}, emoji {p(self.share_emoji)}",
+            "most used words: " + ", ".join(w for w, _ in self.top_words[:12]),
+            "words in the most-viewed titles: " + ", ".join(w for w, _ in self.weighted_top_words[:12]),
+        ]
 
 
 def _has_emoji(t: str) -> bool:
@@ -43,7 +46,8 @@ def _has_emoji(t: str) -> bool:
 def title_patterns(items: list[tuple[str, float]], keyword: str = "") -> Patterns:
     n = len(items) or 1
     kw = fold(keyword)
-    words_count, weighted = Counter(), Counter()
+    words_count: Counter[str] = Counter()
+    weighted: dict[str, float] = {}
     q = num = du = first = tag = emo = 0
     lens = []
     for title, views in items:
@@ -59,6 +63,16 @@ def title_patterns(items: list[tuple[str, float]], keyword: str = "") -> Pattern
         cw = set(content_words(core))
         words_count.update(cw)
         for w in cw:
-            weighted[w] += float(views or 0)
-    return Patterns(len(items), median(lens) if lens else 0, q / n, num / n, du / n, first / n, tag / n, emo / n,
-                    words_count.most_common(25), weighted.most_common(25))
+            weighted[w] = weighted.get(w, 0.0) + float(views or 0)
+    return Patterns(
+        len(items),
+        median(lens) if lens else 0,
+        q / n,
+        num / n,
+        du / n,
+        first / n,
+        tag / n,
+        emo / n,
+        words_count.most_common(25),
+        sorted(weighted.items(), key=lambda kv: -kv[1])[:25],
+    )
