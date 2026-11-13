@@ -22,7 +22,7 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[http,dev]"
 git init && git config core.hooksPath .githooks   # verify runs before every commit
-scripts/verify.sh             # expected: verify: OK (36 tests, coverage >= 85%)
+scripts/verify.sh             # expected: verify: OK (38 tests, coverage >= 85%)
 ```
 
 Next time: `cd ~/Documents/dev/aidemy_seo && . .venv/bin/activate`.
