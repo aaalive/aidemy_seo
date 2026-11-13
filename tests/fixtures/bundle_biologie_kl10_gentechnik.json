@@ -1,0 +1,52 @@
+{
+ "meta": {
+  "subject": "Biologie",
+  "topic": "Nutzen und Risiken ausgewählter transgener Organismen",
+  "grade": "Klasse 10",
+  "language": "German"
+ },
+ "overview": {
+  "topicShortName": "Grüne und Rote Gentechnik"
+ },
+ "keyTerms": [
+  {
+   "term": "Transgener Organismus",
+   "preciseDefinition": "Ein Organismus, in dessen Genom durch gentechnische Verfahren gezielt ein oder mehrere artfremde Gene (Transgene) eingefügt wurden."
+  },
+  {
+   "term": "Grüne Gentechnik",
+   "preciseDefinition": "Die Anwendung gentechnischer Verfahren im Bereich der Pflanzenzucht und Landwirtschaft zur Erzeugung von Nutzpflanzen mit veränderten Eigenschaften."
+  },
+  {
+   "term": "Rote Gentechnik",
+   "preciseDefinition": "Die Anwendung gentechnischer Methoden in der Medizin und Pharmazie, beispielsweise zur Diagnostik, zur Herstellung von Arzneimitteln oder zur Gentherapie."
+  },
+  {
+   "term": "Bt-Mais",
+   "preciseDefinition": "Gentechnisch veränderter Mais, der ein Gen des Bakteriums Bacillus thuringiensis enthält und dadurch ein Protein synthetisiert, das spezifische Schadinsekten wie den Maiszünsler abtötet."
+  },
+  {
+   "term": "Herbizidresistenz",
+   "preciseDefinition": "Die Eigenschaft von Nutzpflanzen, durch ein eingefügtes Gen die Einwirkung eines bestimmten Breitbandherbizids (Unkrautvernichtungsmittels) schadlos zu überstehen."
+  },
+  {
+   "term": "Biofortifikation",
+   "preciseDefinition": "Die Anreicherung des Nährstoffgehalts von Nahrungspflanzen durch biologische oder gentechnische Verfahren, wie beim Goldenen Reis zur Steigerung des Beta-Carotin-Gehalts."
+  },
+  {
+   "term": "Auskreuzung",
+   "preciseDefinition": "Die unbeabsichtigte Übertragung von Genen von transgenen Pflanzen auf benachbarte konventionelle Nutzpflanzen oder nahe verwandte Wildpflanzen durch Pollenflug."
+  },
+  {
+   "term": "Somatische Gentherapie",
+   "preciseDefinition": "Das Einbringen von funktionstüchtigen Genen in die Körperzellen (Somazellen) eines erkrankten Menschen zur Behandlung genetisch bedingter Krankheiten, ohne dass die Veränderung an die Nachkommen vererbt wird."
+  }
+ ],
+ "coreTopics": [
+  "Definition und Grundlagen transgener Organismen (Grüne und Rote Gentechnik)",
+  "Nutzen der Grünen Gentechnik: Bt-Mais, Herbizidresistenz und Biofortifikation (Goldener Reis)",
+  "Risiken der Grünen Gentechnik: Auskreuzung, Resistenzen, Nicht-Zielorganismen und wirtschaftliche Abhängigkeit",
+  "Nutzen der Roten Gentechnik: Pharmazeutische Proteinherstellung (z. B. Insulin) und somatische Gentherapie",
+  "Risiken und ethische Aspekte der Roten Gentechnik"
+ ]
+}
