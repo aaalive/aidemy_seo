@@ -22,7 +22,7 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[http,dev]"
 git init && git config core.hooksPath .githooks   # verify runs before every commit
-scripts/verify.sh             # expected: verify: OK (105 tests, coverage >= 85%)
+scripts/verify.sh             # expected: verify: OK (132 tests, coverage >= 85%)
 ```
 
 Next time: `cd ~/Documents/dev/aidemy_seo && . .venv/bin/activate`.
@@ -321,6 +321,31 @@ one-line message; the ledger is never changed by a refused command.
 3. Don't skip a template because you don't like it for a topic - that is the bias the hash
    removes.
 
+### 12. Check many videos at once (batch CSV)
+
+```bash
+aidemy-seo analyze-batch videos.csv --min-score 60 --json
+```
+
+Reads a CSV (UTF-8; `,`, `;` or tab, detected from the header) with the columns `title`,
+`description`, `tags` (separated by `|`) and an optional `video_id`. Offline, 0 API units.
+
+- Score 0-100 per row, with a reason for every lost point:
+  - **title length** (30): 40-65 characters, minus 1 point per character outside.
+  - **shared words** (30): the share of the title's topic words that are also in the
+    description. Hashtags and template words ("musst", "wissen", "einfach erklärt") don't count.
+  - **tags** (40): 20 for 5-15 unique tags + 20 for a total under 500 characters.
+- **Duplicate titles** are listed as pairs of lines (same title apart from case, umlauts and
+  spaces).
+- Other columns are ignored. A row with the wrong number of fields or no title is skipped
+  with a warning naming its line. An empty description or empty tags is scored, not skipped.
+- `--min-score N` lists only rows with at least N points. The summary says how many are hidden.
+  Warnings and duplicates still cover every row. `--json` works before or after the command.
+- This score is its own rubric. It is not the `title` check (35-60 characters without
+  hashtags) and not vidIQ.
+
+Don't commit real channel exports.
+
 ---
 
 ## Use from Python (how aidemy_pub calls it)
@@ -405,6 +430,7 @@ src/aidemy_seo/
   schedule.py      best posting slots / hours
   learn.py         title-feature lift on your own videos; age-fair views_per_day + age window
   experiments.py   title template experiments: hash assignment, JSON ledger, bootstrap report
+  batch.py         batch CSV analysis: per-row score, duplicate titles, ranking
   benchmark.py     title patterns of top videos
   youtube_api.py   minimal read-only YouTube Data API client
   competitors.py   other channels: per-channel normalised posting times + title styles
@@ -424,6 +450,10 @@ specs/  docs/adr/  docs/quality.md  scripts/verify.sh  .claude/  .githooks/  .gi
 - An experiment `winner` is only as trustworthy as the plan behind it: fix the number of
   videos per arm in advance. The interval comes from a bootstrap on few videos - it is
   a careful estimate, not a guarantee.
+- The batch CSV word match uses 6-letter prefixes, so "Nahrungsnetze" and "Nahrungsketten"
+  count as the same word. A topic that is also a hook word ("Wahrheit", "Mythos") doesn't count.
+  The tag length adds up the tag characters only. YouTube also counts commas and quotes, so a
+  total just under 500 can still be too long. Only exact duplicate titles are found.
 
 ## Licence
 

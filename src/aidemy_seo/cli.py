@@ -61,6 +61,16 @@ def _positive_int(s: str) -> int:
     return n
 
 
+def _min_score(s: str) -> float:
+    try:
+        v = float(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {s!r}") from None
+    if not (math.isfinite(v) and 0 <= v <= 100):  # float() accepts "inf" and "nan" - neither is a score
+        raise argparse.ArgumentTypeError(f"must be a number from 0 to 100, got {s}")
+    return v
+
+
 def _default(o: object) -> object:
     if is_dataclass(o) and not isinstance(o, type):
         return asdict(o)
@@ -201,6 +211,16 @@ def _experiment(a: argparse.Namespace) -> Result:
         raise UsageError(str(e)) from None
 
 
+def _analyze_batch(a: argparse.Namespace) -> Result:
+    from .batch import BatchError, analyze_batch
+
+    try:
+        rep = analyze_batch(a.csv_path, min_score=a.min_score)
+    except BatchError as e:
+        raise UsageError(str(e)) from None
+    return rep.to_json(), rep.lines()
+
+
 def _benchmark(a: argparse.Namespace) -> Result:
     from .benchmark import title_patterns
     from .youtube_api import YouTubeAPI
@@ -306,6 +326,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], Result]] = {
     "schedule": _schedule,
     "learn": _learn,
     "experiment": _experiment,
+    "analyze-batch": _analyze_batch,
     "benchmark": _benchmark,
     "calibrate": _calibrate,
     "lesson": _lesson,
@@ -399,6 +420,15 @@ def build_parser() -> argparse.ArgumentParser:
     er.add_argument("--min-group", type=_positive_int, default=DEFAULT_MIN_GROUP, help="used videos needed per arm")
     er.add_argument("--confidence", type=_confidence, default=DEFAULT_CONFIDENCE)
     er.add_argument("--seed", type=int, default=0, help="bootstrap seed - same seed, same interval")
+
+    ab = sub.add_parser(
+        "analyze-batch",
+        help="SEO score, ranking and duplicate titles for many videos from a CSV (title, description, tags)",
+    )
+    ab.add_argument("csv_path", help="CSV (UTF-8) with columns title, description, tags ('|'-separated), video_id")
+    ab.add_argument("--min-score", type=_min_score, default=0.0, help="only list rows with at least this score (0-100)")
+    # also accepted after the command; SUPPRESS keeps a global `aidemy-seo --json analyze-batch` from being reset
+    ab.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="machine-readable output")
 
     b = sub.add_parser("benchmark", help="title patterns of the top videos for a keyword (needs YOUTUBE_API_KEY)")
     b.add_argument("keyword")

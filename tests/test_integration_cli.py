@@ -454,3 +454,62 @@ def test_installed_executable_end_to_end(tmp_path):
         timeout=60,
     )
     assert r.returncode == 0 and json.loads(r.stdout)[0]["title"].startswith("Gentechnik")
+
+
+BATCH = str(FIX / "batch_videos.csv")
+
+
+def test_analyze_batch_cli_text_json_and_min_score(capsys):
+    out = run(capsys, "analyze-batch", BATCH).splitlines()
+    assert out[0] == (
+        f"analyzed 5 of 6 rows in {BATCH} (1 skipped); 1 duplicate title pair; showing 5 with score >= 0 (0 hidden)"
+    )
+    assert out.index("RANKING") < out.index("WARNINGS") < out.index("DUPLICATE TITLES")
+    assert "  ignored columns: views" in out and "  line 5: skipped - 2 fields, header has 5" in out
+    assert "  line 4: repeated tags ignored: gentechnik" in out
+    assert "  lines 4 and 8: Gentechnik: Das musst du wissen! #Biologie #Klasse10" in out
+    global_flag = json.loads(run(capsys, "--json", "analyze-batch", BATCH))
+    local_flag = json.loads(run(capsys, "analyze-batch", BATCH, "--json"))
+    assert global_flag == local_flag
+    assert [(r["line"], r["video_id"], r["score"]) for r in local_flag["ranked"]] == [
+        (2, "v1", 100.0),
+        (8, "v6", 100.0),
+        (7, "v5", 85.0),
+        (4, "v2", 70.0),
+        (6, "v4", 26.0),
+    ]
+    j = json.loads(run(capsys, "analyze-batch", BATCH, "--min-score", "60", "--json"))
+    assert (j["shown"], j["hidden"]) == (4, 1) and j["duplicates"] == [
+        {"lines": [4, 8], "title": "Gentechnik: Das musst du wissen! #Biologie #Klasse10"}
+    ]
+    assert "showing 4 with score >= 60 (1 hidden)" in run(capsys, "analyze-batch", BATCH, "--min-score", "60")
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["{MISSING}"], "not found"),
+        (["{LATIN1}"], "not UTF-8"),
+        (["{NOTAGS}"], "missing column(s): tags"),
+        (["{OK}", "--min-score", "-1"], "--min-score"),
+        (["{OK}", "--min-score", "101"], "--min-score"),
+        (["{OK}", "--min-score", "nan"], "--min-score"),
+        (["{OK}", "--min-score", "inf"], "--min-score"),
+        (["{OK}", "--min-score", "abc"], "--min-score"),
+    ],
+)
+def test_analyze_batch_cli_errors_exit_2(capsys, tmp_path, argv, message):
+    (tmp_path / "latin1.csv").write_bytes("title;description;tags\nGrüne;x;y\n".encode("latin-1"))
+    (tmp_path / "notags.csv").write_text("title;description\nA;B\n", encoding="utf-8")
+    paths = {
+        "{MISSING}": str(tmp_path / "missing.csv"),
+        "{LATIN1}": str(tmp_path / "latin1.csv"),
+        "{NOTAGS}": str(tmp_path / "notags.csv"),
+        "{OK}": BATCH,
+    }
+    with pytest.raises(SystemExit) as exc:
+        main(["analyze-batch", *[paths.get(x, x) for x in argv]])
+    captured = capsys.readouterr()
+    assert exc.value.code == 2 and message in captured.err and "Traceback" not in captured.err
+    assert captured.err.strip().splitlines()[-1].startswith("aidemy-seo")
+    assert captured.out == ""
