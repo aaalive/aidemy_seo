@@ -1,0 +1,116 @@
+{
+ "_comment": "SYNTHETIC age-confound example (not real channel numbers), now = 2026-11-15T00:00:00Z. q0-q5: question titles, 90-95 days old, 10 views/day -> high TOTAL views. m0-m5: other titles, 10-15 days old, 30 views/day -> low totals. Raw views say 'question helps'; views_per_day says 'question hurts'. e_*: edge cases - no publish time, unparseable publish time, published after now, no views.",
+ "videos": [
+  {
+   "video_id": "q0",
+   "kind": "short",
+   "title": "Photosynthese \u2013 kannst du es erkl\u00e4ren? #Bio #Klasse10",
+   "went_public_at": "2026-08-17T00:00:00Z",
+   "views": 900
+  },
+  {
+   "video_id": "q1",
+   "kind": "short",
+   "title": "Zellatmung \u2013 kannst du es erkl\u00e4ren? #Bio #Klasse10",
+   "went_public_at": "2026-08-16T00:00:00Z",
+   "views": 910
+  },
+  {
+   "video_id": "q2",
+   "kind": "short",
+   "title": "Mitose \u2013 kannst du es erkl\u00e4ren? #Bio #Klasse10",
+   "went_public_at": "2026-08-15T00:00:00Z",
+   "views": 920
+  },
+  {
+   "video_id": "q3",
+   "kind": "short",
+   "title": "Meiose \u2013 kannst du es erkl\u00e4ren? #Bio #Klasse10",
+   "went_public_at": "2026-08-14T00:00:00Z",
+   "views": 930
+  },
+  {
+   "video_id": "q4",
+   "kind": "short",
+   "title": "Enzyme \u2013 kannst du es erkl\u00e4ren? #Bio #Klasse10",
+   "went_public_at": "2026-08-13T00:00:00Z",
+   "views": 940
+  },
+  {
+   "video_id": "q5",
+   "kind": "short",
+   "title": "Osmose \u2013 kannst du es erkl\u00e4ren? #Bio #Klasse10",
+   "went_public_at": "2026-08-12T00:00:00Z",
+   "views": 950
+  },
+  {
+   "video_id": "m0",
+   "kind": "short",
+   "title": "Genetik: Merksatz #Bio #Klasse10",
+   "went_public_at": "2026-11-05T00:00:00Z",
+   "views": 300
+  },
+  {
+   "video_id": "m1",
+   "kind": "short",
+   "title": "Evolution: Merksatz #Bio #Klasse10",
+   "went_public_at": "2026-11-04T00:00:00Z",
+   "views": 330
+  },
+  {
+   "video_id": "m2",
+   "kind": "short",
+   "title": "\u00d6kosystem: Merksatz #Bio #Klasse10",
+   "went_public_at": "2026-11-03T00:00:00Z",
+   "views": 360
+  },
+  {
+   "video_id": "m3",
+   "kind": "short",
+   "title": "Hormone: Merksatz #Bio #Klasse10",
+   "went_public_at": "2026-11-02T00:00:00Z",
+   "views": 390
+  },
+  {
+   "video_id": "m4",
+   "kind": "short",
+   "title": "Nervenzelle: Merksatz #Bio #Klasse10",
+   "went_public_at": "2026-11-01T00:00:00Z",
+   "views": 420
+  },
+  {
+   "video_id": "m5",
+   "kind": "short",
+   "title": "Immunsystem: Merksatz #Bio #Klasse10",
+   "went_public_at": "2026-10-31T00:00:00Z",
+   "views": 450
+  },
+  {
+   "video_id": "e_nodate",
+   "kind": "short",
+   "title": "Zellkern: Merksatz #Bio #Klasse10",
+   "views": 500
+  },
+  {
+   "video_id": "e_baddate",
+   "kind": "short",
+   "title": "Ribosom: Merksatz #Bio #Klasse10",
+   "went_public_at": "gestern",
+   "views": 500
+  },
+  {
+   "video_id": "e_future",
+   "kind": "short",
+   "title": "Chloroplast: Merksatz #Bio #Klasse10",
+   "went_public_at": "2026-11-20T00:00:00Z",
+   "views": 10
+  },
+  {
+   "video_id": "e_noviews",
+   "kind": "short",
+   "title": "Mitochondrien: Merksatz #Bio #Klasse10",
+   "went_public_at": "2026-11-01T00:00:00Z",
+   "views": null
+  }
+ ]
+}

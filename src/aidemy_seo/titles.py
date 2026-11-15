@@ -71,6 +71,8 @@ LISTING_RE = re.compile(
     re.I,
 )
 
+MAX_TITLE_LEN = 66  # YouTube shows about this much of a Short's title
+
 TEMPLATES = (
     "{x} – kannst du es erklären?",
     "{x} einfach erklärt – das musst du wissen!",
@@ -92,7 +94,7 @@ class TitleScore:
         return [f"{k}: {v[2]}" for k, v in self.checks.items() if not v[0]]
 
 
-def score_title(title: str, keyword: str = "", *, max_len: int = 66, ideal: tuple = (35, 60)) -> TitleScore:
+def score_title(title: str, keyword: str = "", *, max_len: int = MAX_TITLE_LEN, ideal: tuple = (35, 60)) -> TitleScore:
     """Explainable 0-100 score. `keyword` = the phrase people search for (optional)."""
     core = strip_hashtags(title)
     ws = set(words(core))
@@ -129,7 +131,18 @@ def score_title(title: str, keyword: str = "", *, max_len: int = 66, ideal: tupl
     return TitleScore(title, round(100.0 * got / total_w, 1), checks)
 
 
-def build_title(keyword: str, template: str, tags: list[str], max_len: int = 66) -> str:
+def title_tags(subject: str = "", grade: str = "") -> list[str]:
+    """The hashtags every title ends with: #Fach and #KlasseN ("Klasse 10" -> "#Klasse10")."""
+    tags = []
+    if subject:
+        tags.append("#" + re.sub(r"[^\wäöüÄÖÜß]", "", subject))
+    m = re.search(r"\d+", grade or "")
+    if m:
+        tags.append(f"#Klasse{m.group(0)}")
+    return tags
+
+
+def build_title(keyword: str, template: str, tags: list[str], max_len: int = MAX_TITLE_LEN) -> str:
     hook = template.format(x=keyword)
     while tags and len(hook) + 1 + len(" ".join(tags)) > max_len:
         tags = tags[:-1]
@@ -141,18 +154,13 @@ def optimize_title(
     *,
     subject: str = "",
     grade: str = "",
-    max_len: int = 66,
+    max_len: int = MAX_TITLE_LEN,
     templates: tuple = TEMPLATES,
     weights: dict | None = None,
 ) -> list[TitleScore]:
     """Ranked title candidates for `keyword`. `weights` (template -> bonus 0-1) comes from
     calibration / learning; without it the checklist alone ranks them."""
-    tags = []
-    if subject:
-        tags.append("#" + re.sub(r"[^\wäöüÄÖÜß]", "", subject))
-    m = re.search(r"\d+", grade or "")
-    if m:
-        tags.append(f"#Klasse{m.group(0)}")
+    tags = title_tags(subject, grade)
     out = []
     for x in dict.fromkeys([keyword, keyword.split(" & ")[0]]):
         for tpl in templates:

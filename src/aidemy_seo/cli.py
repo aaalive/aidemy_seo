@@ -7,13 +7,58 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 Result = tuple[Any, list[str]]
+
+
+class UsageError(ValueError):
+    """Bad combination of arguments found inside a handler -> argparse usage error (exit 2), no traceback."""
+
+
+def _iso_time(s: str) -> datetime:
+    from .learn import parse_time
+
+    t = parse_time(s)
+    if t is None:
+        raise argparse.ArgumentTypeError(f"not an ISO 8601 date/time: {s!r} (e.g. 2026-11-15 or 2026-11-15T12:00:00Z)")
+    return t
+
+
+def _days(s: str) -> float:
+    try:
+        d = float(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number of days: {s!r}") from None
+    if not (math.isfinite(d) and d >= 0):  # float() accepts "inf" and "nan" - neither is an age
+        raise argparse.ArgumentTypeError(f"must be a finite number of days >= 0, got {s}")
+    return d
+
+
+def _confidence(s: str) -> float:
+    try:
+        c = float(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {s!r}") from None
+    if not (math.isfinite(c) and 0 < c < 1):
+        raise argparse.ArgumentTypeError(f"must be between 0 and 1 (e.g. 0.95), got {s}")
+    return c
+
+
+def _positive_int(s: str) -> int:
+    try:
+        n = int(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a whole number: {s!r}") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {s}")
+    return n
 
 
 def _default(o: object) -> object:
@@ -76,14 +121,84 @@ def _schedule(a: argparse.Namespace) -> Result:
 
 def _learn(a: argparse.Namespace) -> Result:
     from .aidemy_pub import load_channel_videos
-    from .learn import feature_lift
+    from .learn import check_age_window, coverage_line, feature_lift, uses_age, videos_for_metric
 
-    findings = feature_lift(load_channel_videos(a.stats_json), metric=a.metric, min_group=a.min_group)
-    return findings, [
+    try:
+        check_age_window(a.min_age, a.max_age)
+    except ValueError as e:
+        raise UsageError(str(e)) from None
+    videos = load_channel_videos(a.stats_json)
+    now = a.now or datetime.now(timezone.utc)
+    window = {"min_age": a.min_age, "max_age": a.max_age}
+    used, left = videos_for_metric(videos, metric=a.metric, now=now, **window)
+    findings = feature_lift(used, metric=a.metric, min_group=a.min_group)
+    aged = uses_age(a.metric, **window)
+    lines = [coverage_line(len(videos), len(used), left, metric=a.metric, now=now if aged else None, **window)]
+    if a.metric == "views" and not aged:
+        lines.append(
+            "hint: total views favour older videos - for a fair comparison use --metric views_per_day "
+            "(or views_24h) and/or an age window (--min-age / --max-age)"
+        )
+    lines += [
         f"{f.feature:<18} with {f.with_n:>3} ({f.with_median:>7}) without {f.without_n:>3} "
         f"({f.without_median:>7})  {f.verdict}"
         for f in findings
     ]
+    return findings, lines
+
+
+def _experiment_assign(a: argparse.Namespace) -> Result:
+    from .experiments import assign
+
+    res = assign(
+        a.ledger,
+        experiment=a.experiment,
+        key=a.key,
+        keyword=a.keyword,
+        subject=a.subject,
+        grade=a.grade,
+        arms=a.arm,
+        now=a.now,
+    )
+    state = f"already assigned {res.assigned_at} - nothing changed" if res.already_assigned else "new"
+    lines = [
+        f"experiment {res.experiment}, key {res.key} -> arm {res.arm} ({state})",
+        f"title: {res.title}",
+    ]
+    return res, lines + [f"warning: {w}" for w in res.warnings]
+
+
+def _experiment_report(a: argparse.Namespace) -> Result:
+    from .aidemy_pub import load_channel_videos
+    from .experiments import load_ledger, report
+
+    ledger = load_ledger(a.ledger, must_exist=True)
+    try:
+        videos = load_channel_videos(a.stats_json)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise UsageError(f"can't read stats file {a.stats_json}: {getattr(e, 'strerror', None) or e}") from None
+    rep = report(
+        ledger,
+        videos,
+        experiment=a.experiment,
+        metric=a.metric,
+        now=a.now,
+        min_age=a.min_age,
+        max_age=a.max_age,
+        min_group=a.min_group,
+        confidence=a.confidence,
+        seed=a.seed,
+    )
+    return rep.to_json(), rep.lines()
+
+
+def _experiment(a: argparse.Namespace) -> Result:
+    from .experiments import ExperimentError
+
+    try:
+        return _experiment_assign(a) if a.action == "assign" else _experiment_report(a)
+    except ExperimentError as e:
+        raise UsageError(str(e)) from None
 
 
 def _benchmark(a: argparse.Namespace) -> Result:
@@ -190,6 +305,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], Result]] = {
     "description": _description,
     "schedule": _schedule,
     "learn": _learn,
+    "experiment": _experiment,
     "benchmark": _benchmark,
     "calibrate": _calibrate,
     "lesson": _lesson,
@@ -234,8 +350,55 @@ def build_parser() -> argparse.ArgumentParser:
 
     lr = sub.add_parser("learn", help="which title features go with more views on your own channel")
     lr.add_argument("stats_json")
-    lr.add_argument("--metric", default="views")
+    lr.add_argument(
+        "--metric",
+        default="views",
+        help="a field of the stats file (views, views_24h, ...) or views_per_day = views / age in days "
+        "(derived, at least 1 day); default views - total views favour older videos",
+    )
     lr.add_argument("--min-group", type=int, default=5)
+    lr.add_argument("--min-age", type=_days, default=None, help="only videos at least this many days old")
+    lr.add_argument("--max-age", type=_days, default=None, help="only videos at most this many days old")
+    lr.add_argument(
+        "--now",
+        type=_iso_time,
+        default=None,
+        help="reference time for ages, ISO 8601 (2026-11-15 or 2026-11-15T12:00:00Z); default: current UTC time",
+    )
+
+    from .experiments import ARMS, DEFAULT_CONFIDENCE, DEFAULT_MIN_AGE_DAYS, DEFAULT_MIN_GROUP
+
+    ex = sub.add_parser(
+        "experiment",
+        help="A/B-test title templates: a fixed hash assigns each new video a template, the report says which wins",
+    )
+    exs = ex.add_subparsers(dest="action", required=True)
+    ea = exs.add_parser("assign", help="assign a title template to a video before upload (recorded in the ledger)")
+    ea.add_argument("ledger", help="the experiment ledger JSON file (created on the first assign)")
+    ea.add_argument("--experiment", required=True, help="experiment name, e.g. hook-2026-11")
+    ea.add_argument("--key", required=True, help="stable id of the video before upload, e.g. the lesson slug")
+    ea.add_argument("--keyword", required=True, help="the searched keyword the title leads with")
+    ea.add_argument("--subject", default="")
+    ea.add_argument("--grade", default="")
+    ea.add_argument(
+        "--arm",
+        action="append",
+        default=None,
+        help=f"arm (repeatable, only when the experiment starts; default: all): {', '.join(ARMS)}",
+    )
+    ea.add_argument("--now", type=_iso_time, default=None, help="time recorded in the ledger (ISO 8601)")
+
+    er = exs.add_parser("report", help="which template wins: views per day, confidence interval, verdict")
+    er.add_argument("ledger")
+    er.add_argument("stats_json", help="aidemy_pub state/youtube/stats.json")
+    er.add_argument("--experiment", required=True)
+    er.add_argument("--metric", default="views_per_day")
+    er.add_argument("--min-age", type=_days, default=DEFAULT_MIN_AGE_DAYS, help="days (default: %(default)s)")
+    er.add_argument("--max-age", type=_days, default=None)
+    er.add_argument("--now", type=_iso_time, default=None, help="reference time for ages (ISO 8601)")
+    er.add_argument("--min-group", type=_positive_int, default=DEFAULT_MIN_GROUP, help="used videos needed per arm")
+    er.add_argument("--confidence", type=_confidence, default=DEFAULT_CONFIDENCE)
+    er.add_argument("--seed", type=int, default=0, help="bootstrap seed - same seed, same interval")
 
     b = sub.add_parser("benchmark", help="title patterns of the top videos for a keyword (needs YOUTUBE_API_KEY)")
     b.add_argument("keyword")
@@ -268,8 +431,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    a = build_parser().parse_args(argv)
-    payload, lines = HANDLERS[a.cmd](a)
+    p = build_parser()
+    a = p.parse_args(argv)
+    try:
+        payload, lines = HANDLERS[a.cmd](a)
+    except UsageError as e:
+        p.error(f"{a.cmd}: {e}")  # exits 2 with the usage line, like argparse's own checks
     if a.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2, default=_default))
     else:
