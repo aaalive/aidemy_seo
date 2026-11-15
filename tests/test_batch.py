@@ -78,6 +78,35 @@ def test_shared_words_ignores_template_words_and_counts_fraction():
     assert s.points["shared_words"] == 30.0 and not any(i.startswith("shared words") for i in s.issues)
 
 
+def test_shared_words_ignores_verbs_and_lowercase_words():
+    # her real live titles (2026-11-15): verbs were reported as "missing" topic words
+    marx = "Treibt Ökonomie die Geschichte? Karl Marx erklärt #Geschichte"
+    s = score_row(marx, "Ökonomie und Geschichte: was Karl Marx über die Arbeiterbewegung schrieb.", "")
+    assert s.points["shared_words"] == 30.0 and not any(i.startswith("shared words") for i in s.issues)
+    krieg = "Wie gelang die Humanisierung der Kriegsführung? #Geschichte"
+    s = score_row(krieg, "Die Humanisierung der Kriegsführung im 19. und 20. Jahrhundert.", "")
+    assert s.points["shared_words"] == 30.0
+    lebenslauf = "Ist der ausführliche Lebenslauf eine Liste? #Deutsch #Klasse9"
+    s = score_row(lebenslauf, "So schreibst du einen ausführlichen Lebenslauf.", "")
+    assert 'description misses "Liste" (1 of 2 title words)' in " ".join(s.issues)  # a noun still counts
+
+
+def test_shared_words_still_catches_a_missing_topic_noun():
+    # must-catch, her real lowest-scoring Short: the description never names the topic
+    s = score_row(
+        "Artenvielfalt einfach erklärt – endlich klar! #Biologie #Klasse11",
+        "Abonniere den Kanal für mehr Biologie. #Biologie #Klasse11",
+        "",
+    )
+    assert 'shared words: description misses "Artenvielfalt" (0 of 1 title words)' in s.issues
+    # a capitalised noun at the start is kept (not a verb)
+    s = score_row("Sagen und Mythen – kannst du es erklären?", "Sagen und Märchen", "")
+    assert 'description misses "Mythen" (1 of 2 title words)' in " ".join(s.issues)
+    # a title with no capitalised word keeps every word (English or all lowercase)
+    s = score_row("how photosynthesis works in plants", "Plants make sugar from light.", "")
+    assert "photosynthesis" in " ".join(s.issues) and s.points["shared_words"] > 0
+
+
 def test_tags_count_and_length_boundaries():
     def tags(n):
         return "|".join(f"Tag{i}" for i in range(n))

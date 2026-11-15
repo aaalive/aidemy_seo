@@ -63,6 +63,11 @@ total) and from vidIQ. It MUST NOT call or change them.
      `EMOTION_WORDS`, `QUESTION_WORDS` and `DIRECT_ADDRESS`. Hashtags and template words
      ("musst", "wissen", "einfach erklärt") say nothing about the topic. If they counted, the
      channel's own templates would lose points in every row.
+     Then only noun-like words count (2026-11-15): German nouns are capitalised, so a lowercase
+     word never counts, and a sentence-initial word from `HOOK_VERBS` ("Ist", "Gibt", "Treibt",
+     "Führte", ...) is skipped. Why: on her real channel verbs like "gelang", "entsteht",
+     "statt", "Treibt" were reported as missing topics and made good question hooks look bad.
+     A title with no noun-like topic word (English, all lowercase) keeps every word.
    - Description words = `text.stems(description)` (hashtags included).
    - Points = `round(30 * shared / topic_words, 1)`. Issue lists the missing words (as
      written in the title): `shared words: description misses "Gentechnik" (0 of 1 title words)`.
@@ -205,6 +210,15 @@ DUPLICATE TITLES
   erklärt #Biologie", then 0.0 with "title has no topic words". Given an empty description,
   then 0.0 with "description is empty".
   Test: tests/test_batch.py::test_shared_words_ignores_template_words_and_counts_fraction
+- Given "Treibt Ökonomie die Geschichte? Karl Marx erklärt" and a description naming Ökonomie,
+  Geschichte and Karl Marx, then nothing is missing: lowercase words never count (German nouns
+  are capitalised) and a sentence-initial verb ("Ist", "Gibt", "Treibt", "Führte", ...) is
+  skipped. A noun stays a topic word ("Liste" in "Ist der ausführliche Lebenslauf eine Liste?").
+  Test: tests/test_batch.py::test_shared_words_ignores_verbs_and_lowercase_words
+- Given "Artenvielfalt einfach erklärt – endlich klar!" and a description without it, then
+  "Artenvielfalt" is missing. A capitalised noun at the start is kept ("Sagen und Mythen"); a
+  title with no capitalised word (English, all lowercase) keeps every word.
+  Test: tests/test_batch.py::test_shared_words_still_catches_a_missing_topic_noun
 - Given 4, 5, 15 and 16 unique tags, then the count points are 0, 20, 20, 0. Given unique tags
   totalling 499 and 500 characters, then the length points are 20 and 0. Given `a||b| `, then 2
   tags. Given an empty tags field, then tags is 0 with the issue "tags: none".

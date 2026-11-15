@@ -83,13 +83,70 @@ def _title_length(title: str) -> tuple[int, list[str]]:
     return max(0, TITLE_POINTS - off), [f"title: {n} characters (aim {TITLE_MIN}-{TITLE_MAX})"]
 
 
+# 2026-11-15 (her real channel, 79 Shorts): "description misses 'Treibt'/'gelang'/'entsteht'/
+# 'statt'/'bleibt'" made good question hooks look bad. A topic in a German title is a noun, and
+# German nouns are capitalised - so a lowercase word never counts. The first word of a sentence is
+# capitalised anyway: there only these common verb forms are skipped (a noun stays: "Sagen und
+# Mythen"). A title without any capitalised topic word (English, all lowercase) keeps every word.
+HOOK_VERBS: frozenset[str] = frozenset(
+    fold(w)
+    for w in (
+        "ist",
+        "sind",
+        "war",
+        "waren",
+        "gibt",
+        "gab",
+        "hat",
+        "hatte",
+        "haben",
+        "wird",
+        "wurde",
+        "kann",
+        "kannst",
+        "können",
+        "koennen",
+        "muss",
+        "musst",
+        "soll",
+        "darf",
+        "führte",
+        "führt",
+        "treibt",
+        "macht",
+        "bringt",
+        "begann",
+        "beginnt",
+        "entsteht",
+        "entstand",
+        "hilft",
+        "steckt",
+        "geht",
+        "kommt",
+        "wirkt",
+        "funktioniert",
+    )
+)
+_SENTENCE_BREAK = "?!.:;–—|"
+
+
 def _topic_words(title: str) -> dict[str, str]:
     """Topic stem -> the word as written in the title (first occurrence), in title order."""
-    out: dict[str, str] = {}
-    for token in re.findall(r"\w+", strip_hashtags(title)):
-        for s in sorted(stems(token) - FILLER_STEMS):
-            out.setdefault(s, token)
-    return out
+    nouns: dict[str, str] = {}
+    every: dict[str, str] = {}
+    start = True
+    for token in re.findall(rf"[{re.escape(_SENTENCE_BREAK)}]|\w+", strip_hashtags(title)):
+        if token in _SENTENCE_BREAK:
+            start = True
+            continue
+        topic = sorted(stems(token) - FILLER_STEMS)
+        noun_like = (token[0].isupper() or token[0].isdigit()) and not (start and fold(token) in HOOK_VERBS)
+        for s in topic:
+            every.setdefault(s, token)
+            if noun_like:
+                nouns.setdefault(s, token)
+        start = False
+    return nouns or every
 
 
 def _shared_words(title: str, description: str) -> tuple[float, list[str]]:
