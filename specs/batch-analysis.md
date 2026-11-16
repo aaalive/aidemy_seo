@@ -167,7 +167,7 @@ DUPLICATE TITLES
 
 ### Data and review
 - A CSV export holds channel data. Real exports MUST NOT be committed (`.gitignore` /
-  review rule in CLAUDE.md). Test fixtures are synthetic rows built from titles that are
+  review rule for user data). Test fixtures are synthetic rows built from titles that are
   already in the repo. The CSV reading code needs a line-by-line review (user/channel data).
 
 ### Known limits (the README MUST say this)

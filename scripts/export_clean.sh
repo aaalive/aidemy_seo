@@ -38,6 +38,14 @@ s.write_text(s.read_text().replace(
 PY
 left="$(grep -rIlE 'CLAUDE\.md|\.claude/|\.githooks|git init' "$r" || true)"
 [ -z "$left" ] || { echo "export: still references removed files: $left" >&2; exit 1; }
+# Upload hygiene (2026-11-16: a task was rejected for __pycache__, *.egg-info and dist/ in the
+# upload). git archive only exports tracked files, so none should be here - this proves it.
+bad="$(cd "$tmp" && find aidemy_seo \( -name __pycache__ -o -name '*.egg-info' -o -name '*.pyc' -o -name .git \
+      -o -name .venv -o -name venv -o -name dist -o -name build -o -name .coverage -o -name htmlcov \
+      -o -name .pytest_cache -o -name .mypy_cache -o -name .ruff_cache -o -name mutants -o -name .DS_Store \
+      -o -name .env \) -print)"
+[ -z "$bad" ] || { echo "export: build/cache output in the export: $bad" >&2; exit 1; }
+[ -f "$r/.gitignore" ] || { echo "export: .gitignore missing" >&2; exit 1; }
 mkdir -p "$(dirname "$out")"; rm -f "$out"
 python3 - "$tmp" "$PWD/$out" <<'PY'
 import os, sys, zipfile
