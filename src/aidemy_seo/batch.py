@@ -10,8 +10,6 @@ Handles user/channel data: never commit real exports.
 
 from __future__ import annotations
 
-import csv
-import io
 import math
 import re
 from dataclasses import dataclass, field
@@ -19,12 +17,12 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any
 
+from .fileio import CsvError, CsvWarning, read_table
 from .text import fold, stems, strip_hashtags
 from .titles import DIRECT_ADDRESS, EMOTION_WORDS, QUESTION_WORDS, TEMPLATES
 
 REQUIRED = ("title", "description", "tags")
 OPTIONAL = ("video_id",)
-DELIMITERS = (",", ";", "\t")
 
 TITLE_MIN, TITLE_MAX, TITLE_POINTS = 40, 65, 30
 WORDS_POINTS = 30
@@ -38,8 +36,11 @@ FILLER_STEMS: frozenset[str] = frozenset().union(
 )
 
 
-class BatchError(ValueError):
+class BatchError(CsvError):
     """A file-level problem: the CSV can't be analyzed at all."""
+
+
+BatchWarning = CsvWarning  # line (None = whole file), message, skipped_row=... (keyword-only)
 
 
 @dataclass
@@ -49,13 +50,6 @@ class BatchRow:
     title: str
     description: str
     tags: str
-
-
-@dataclass
-class BatchWarning:
-    line: int | None  # None = about the whole file
-    message: str
-    skipped_row: bool = False  # this warning is why a row was not analyzed
 
 
 @dataclass
@@ -211,84 +205,29 @@ def score_row(title: str, description: str, tags: str) -> RowScore:
 
 
 # ---------------------------------------------------------------- reading
-def _read_text(path: Path) -> str:
-    try:
-        data = path.read_bytes()
-    except FileNotFoundError:
-        raise BatchError(f"file not found: {path}") from None
-    except IsADirectoryError:
-        raise BatchError(f"{path} is a directory, not a CSV file") from None
-    except OSError as e:
-        raise BatchError(f"can't read {path}: {e.strerror or e}") from None
-    try:
-        return data.decode("utf-8-sig")
-    except UnicodeDecodeError as e:
-        line = data[: e.start].count(b"\n") + 1
-        raise BatchError(f"{path} is not UTF-8 (line {line}) - save it as CSV UTF-8") from None
-
-
-def _header(first_line: str) -> tuple[str, list[str]]:
-    """Pick the first delimiter that gives all required columns; the header's raw field names."""
-    candidates = []
-    for d in DELIMITERS:
-        names = next(csv.reader([first_line], delimiter=d), [])
-        missing = [r for r in REQUIRED if r not in {n.strip().lower() for n in names}]
-        if not missing:
-            return d, names
-        candidates.append((len(REQUIRED) - len(missing), len(names), missing, names))
-    # no delimiter works: report against the split that found the most required columns
-    _, _, missing, names = max(candidates, key=lambda c: (c[0], c[1]))
-    found = ", ".join(n.strip() for n in names if n.strip()) or "none"
-    raise BatchError(f"missing column(s): {', '.join(missing)} (required: {', '.join(REQUIRED)}; found: {found})")
-
-
-def _blank(record: list[str]) -> bool:
-    return all(not f.strip() for f in record)
-
-
 def read_batch(path: str | Path) -> tuple[list[BatchRow], list[BatchWarning]]:
     """Read the CSV. Unknown columns are ignored, broken rows skipped (with a warning).
 
     Raises BatchError for file-level problems (missing, not UTF-8, no header, missing column).
     """
-    path = Path(path)
-    text = _read_text(path)
-    if not text.strip():
-        raise BatchError(f"{path} is empty - expected a header with {', '.join(REQUIRED)}")
-    first_line = next(line for line in text.splitlines() if line.strip())
-    reader = csv.reader(io.StringIO(text, newline=""), delimiter=_header(first_line)[0])
+    try:
+        table = read_table(path, REQUIRED, OPTIONAL)
+    except CsvError as e:
+        raise BatchError(str(e)) from None
     warnings: list[BatchWarning] = []
     rows: list[BatchRow] = []
-    prev_line = 0
-    try:
-        header = next(reader)
-        while _blank(header):  # leading blank lines before the header
-            prev_line = reader.line_num
-            header = next(reader)
-        prev_line = reader.line_num
-        norm = [h.strip().lower() for h in header]
-        for known in REQUIRED + OPTIONAL:
-            if norm.count(known) > 1:
-                raise BatchError(f"column '{known}' appears twice in the header")
-        col = {name: norm.index(name) for name in REQUIRED + OPTIONAL if name in norm}
-        ignored = [h.strip() or f"(unnamed column {i + 1})" for i, h in enumerate(header) if i not in set(col.values())]
-        if ignored:
-            warnings.append(BatchWarning(None, f"ignored columns: {', '.join(ignored)}"))
-        for record in reader:
-            line, prev_line = prev_line + 1, reader.line_num
-            if _blank(record):
-                continue
-            if len(record) != len(header):
-                warnings.append(BatchWarning(line, f"skipped - {len(record)} fields, header has {len(header)}", True))
-                continue
-            title = record[col["title"]].strip()
-            if not title:
-                warnings.append(BatchWarning(line, "skipped - empty title", True))
-                continue
-            vid = record[col["video_id"]].strip() if "video_id" in col else ""
-            rows.append(BatchRow(line, vid or None, title, record[col["description"]], record[col["tags"]]))
-    except csv.Error as e:
-        raise BatchError(f"{path}: CSV error on line {prev_line + 1}: {e}") from None
+    if table.ignored:
+        warnings.append(BatchWarning(None, f"ignored columns: {', '.join(table.ignored)}"))
+    for r in table.rows:
+        if r.error:
+            warnings.append(BatchWarning(r.line, r.error, skipped_row=True))
+            continue
+        title = table.value(r, "title").strip()
+        if not title:
+            warnings.append(BatchWarning(r.line, "skipped - empty title", skipped_row=True))
+            continue
+        vid = table.value(r, "video_id").strip()
+        rows.append(BatchRow(r.line, vid or None, title, table.value(r, "description"), table.value(r, "tags")))
     return rows, warnings
 
 

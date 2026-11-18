@@ -8,18 +8,119 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 Result = tuple[Any, list[str]]
 
 
 class UsageError(ValueError):
-    """Bad combination of arguments found inside a handler -> argparse usage error (exit 2), no traceback."""
+    """Bad input found inside a handler -> the same one-line error as argparse's own (exit 2), no traceback."""
+
+
+def _error_line(prog: str, message: str) -> str:
+    """One line: what went wrong and where the full usage is - not the whole usage block."""
+    return f"{prog}: error: {message} (usage: {prog} --help)\n"
+
+
+class OneLineErrorParser(argparse.ArgumentParser):
+    """argparse prints the full usage block before every error. Print one line instead (exit 2);
+    `--help` still shows the full usage. Subparsers inherit this class."""
+
+    def error(self, message: str) -> NoReturn:
+        self.exit(2, _error_line(self.prog, message))
+
+
+class CommandFailed(RuntimeError):
+    """The input was fine but the command could not finish (e.g. the YouTube API request failed) ->
+    one error line, exit 1. No usage pointer: the command was used correctly."""
+
+
+_KEY_IN_URL = re.compile(r"(key=)[^&\s]+")
+
+
+def _hide_key(text: str, key: str = "") -> str:
+    """An API error message can hold the request URL with `key=...` - never print the key."""
+    text = _KEY_IN_URL.sub(r"\1***", text)
+    return text.replace(key, "***") if key else text
+
+
+NO_KEY = "no YouTube API key - set YOUTUBE_API_KEY (a read-only key is enough)"
+NO_REQUESTS = "live YouTube data needs the optional 'requests' package - pip install 'aidemy-seo[http]'"
+
+
+def _api_reason(e: BaseException, key: str = "") -> str:
+    """A short reason for a failed API request - not requests' long text with the URL (and the key)."""
+    resp = getattr(e, "response", None)
+    status = getattr(resp, "status_code", None)
+    if resp is not None and status:
+        try:
+            detail = str(resp.json()["error"]["message"])
+        except (ValueError, KeyError, TypeError, AttributeError):  # no JSON error body: the status is enough
+            detail = ""
+        reason = f"HTTP {status} {getattr(resp, 'reason', '') or ''}".strip()
+        return _short(_hide_key(f"{reason} - {detail}" if detail else reason, key))
+    name = type(e).__name__
+    if "Timeout" in name:
+        return "the request timed out"
+    if "Connection" in name:
+        return "can't reach the YouTube API - are you online?"
+    return _short(_hide_key(str(e) or name, key))
+
+
+def _short(text: str, limit: int = 160) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def _api_call(key: str, call: Callable[[], Any]) -> Any:
+    """Run a YouTube API call: a missing `requests` package is a usage error (exit 2), a failed
+    request (offline, 403, bad response) one short error line (exit 1) - with the key hidden."""
+    try:
+        return call()
+    except ImportError:
+        raise UsageError(NO_REQUESTS) from None
+    except (OSError, ValueError) as e:  # requests' errors are OSErrors; a broken JSON answer is a ValueError
+        raise CommandFailed(f"YouTube API request failed: {_api_reason(e, key)}") from None
+
+
+def _input_json(path: str, what: str) -> Any:
+    from .fileio import InputFileError, read_input_json
+
+    try:
+        return read_input_json(path, what)
+    except InputFileError as e:
+        raise UsageError(str(e)) from None
+
+
+def _input_text(path: str, what: str) -> str:
+    from .fileio import InputFileError, read_input_text
+
+    try:
+        return read_input_text(path, what)
+    except InputFileError as e:
+        raise UsageError(str(e)) from None
+
+
+def _load_stats(path: str) -> list[dict]:
+    """The videos of an aidemy_pub stats.json ({"videos": [{...}, ...]}); a wrong shape is one error line."""
+    data = _input_json(path, "stats file")
+    videos = data.get("videos") if isinstance(data, dict) else None
+    if (
+        not isinstance(data, dict)
+        or not isinstance(videos, list | None)
+        or not all(isinstance(v, dict) for v in videos or [])
+    ):
+        raise UsageError(
+            f'stats file {path} must be a JSON object with a "videos" list of objects '
+            "(aidemy_pub state/youtube/stats.json)"
+        )
+    return list(videos or [])
 
 
 def _iso_time(s: str) -> datetime:
@@ -105,16 +206,15 @@ def _title(a: argparse.Namespace) -> Result:
 def _description(a: argparse.Namespace) -> Result:
     from .descriptions import audit_description
 
-    text = sys.stdin.read() if a.path == "-" else Path(a.path).read_text(encoding="utf-8")
+    text = sys.stdin.read() if a.path == "-" else _input_text(a.path, "description file")
     audit = audit_description(text, keywords=a.keyword, link_hint=a.link_hint)
     return audit, [f"score {audit.score}/100"] + [f"  - {i}" for i in audit.issues]
 
 
 def _schedule(a: argparse.Namespace) -> Result:
-    from .aidemy_pub import load_channel_videos
     from .schedule import best_slots, metric_coverage
 
-    videos = load_channel_videos(a.stats_json)
+    videos = _load_stats(a.stats_json)
     slots = best_slots(videos, tz=a.tz, metric=a.metric, min_videos=a.min_videos, fallback_metric=a.fallback_metric)
     have, total = metric_coverage(videos, a.metric)
     used = f"{have} of {total} Shorts have {a.metric}" + (
@@ -130,14 +230,13 @@ def _schedule(a: argparse.Namespace) -> Result:
 
 
 def _learn(a: argparse.Namespace) -> Result:
-    from .aidemy_pub import load_channel_videos
     from .learn import check_age_window, coverage_line, feature_lift, uses_age, videos_for_metric
 
     try:
         check_age_window(a.min_age, a.max_age)
     except ValueError as e:
         raise UsageError(str(e)) from None
-    videos = load_channel_videos(a.stats_json)
+    videos = _load_stats(a.stats_json)
     now = a.now or datetime.now(timezone.utc)
     window = {"min_age": a.min_age, "max_age": a.max_age}
     used, left = videos_for_metric(videos, metric=a.metric, now=now, **window)
@@ -179,14 +278,10 @@ def _experiment_assign(a: argparse.Namespace) -> Result:
 
 
 def _experiment_report(a: argparse.Namespace) -> Result:
-    from .aidemy_pub import load_channel_videos
     from .experiments import load_ledger, report
 
     ledger = load_ledger(a.ledger, must_exist=True)
-    try:
-        videos = load_channel_videos(a.stats_json)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
-        raise UsageError(f"can't read stats file {a.stats_json}: {getattr(e, 'strerror', None) or e}") from None
+    videos = _load_stats(a.stats_json)
     rep = report(
         ledger,
         videos,
@@ -209,6 +304,8 @@ def _experiment(a: argparse.Namespace) -> Result:
         return _experiment_assign(a) if a.action == "assign" else _experiment_report(a)
     except ExperimentError as e:
         raise UsageError(str(e)) from None
+    except OSError as e:  # writing the ledger: folder missing, no permission, disk full
+        raise UsageError(f"can't write ledger {a.ledger}: {e.strerror or e}") from None
 
 
 def _analyze_batch(a: argparse.Namespace) -> Result:
@@ -221,11 +318,44 @@ def _analyze_batch(a: argparse.Namespace) -> Result:
     return rep.to_json(), rep.lines()
 
 
+def _ab_pack(a: argparse.Namespace) -> Result:
+    from .abtest import AbError, ab_pack
+
+    try:
+        rep = ab_pack(a.csv_path, a.out, weights_path=a.weights)
+    except AbError as e:
+        raise UsageError(str(e)) from None
+    return rep.to_json(), rep.lines()
+
+
+def _ab_results(a: argparse.Namespace) -> Result:
+    from .abtest import AbError, ab_results
+
+    try:
+        rep = ab_results(a.csv_path, a.weights)
+    except AbError as e:
+        raise UsageError(str(e)) from None
+    return rep.to_json(), rep.lines()
+
+
+def _series(a: argparse.Namespace) -> Result:
+    from .series import SeriesError, find_series
+
+    try:
+        rep = find_series(a.csv_path)
+    except SeriesError as e:
+        raise UsageError(str(e)) from None
+    return rep.to_json(), rep.lines()
+
+
 def _benchmark(a: argparse.Namespace) -> Result:
     from .benchmark import title_patterns
     from .youtube_api import YouTubeAPI
 
-    vids = YouTubeAPI().top_videos(a.keyword, n=a.n, shorts=a.shorts, region=a.region, lang=a.lang)
+    api = YouTubeAPI()
+    if not api.key:
+        raise UsageError(NO_KEY)
+    vids = _api_call(api.key, lambda: api.top_videos(a.keyword, n=a.n, shorts=a.shorts, region=a.region, lang=a.lang))
     pat = title_patterns([(v.title, v.views) for v in vids], a.keyword)
     lines = [*pat.summary(), ""] + [f"{v.views:>10,}  {v.title}  ({v.channel})" for v in vids[:15]]
     return {"patterns": pat, "videos": vids}, lines
@@ -235,10 +365,15 @@ def _calibrate(a: argparse.Namespace) -> Result:
     from .titles import calibrate
 
     rows = []
-    for line in Path(a.csv_path).read_text(encoding="utf-8").splitlines():
+    for n, line in enumerate(_input_text(a.csv_path, "calibration CSV").splitlines(), start=1):
         if ";" in line and not line.lower().startswith("title;"):
             title, score = line.rsplit(";", 1)
-            rows.append((title.strip(), float(score)))
+            try:
+                rows.append((title.strip(), float(score)))
+            except ValueError:
+                raise UsageError(
+                    f"calibration CSV {a.csv_path}, line {n}: score {score.strip()!r} is not a number (title;score)"
+                ) from None
     cal = calibrate(rows)
     by_shape: dict[str, float] = cal["by_shape"]
     return cal, [f"{k:<18} mean {v:>5}  (n={cal['n'][k]})" for k, v in sorted(by_shape.items(), key=lambda x: -x[1])]
@@ -247,7 +382,21 @@ def _calibrate(a: argparse.Namespace) -> Result:
 def _lesson(a: argparse.Namespace) -> Result:
     from .aidemy_pub import suggest_for_lesson
 
-    sug = suggest_for_lesson(json.loads(Path(a.bundle_json).read_text(encoding="utf-8")), top=a.top)
+    bundle = _input_json(a.bundle_json, "bundle")
+    meta = bundle.get("meta") if isinstance(bundle, dict) else None
+    ok = (
+        isinstance(meta, dict)
+        and isinstance(meta.get("topic"), str)
+        and meta["topic"].strip()
+        and isinstance(bundle.get("overview"), dict | None)
+        and isinstance(bundle.get("keyTerms"), list | None)
+    )
+    if not ok:
+        raise UsageError(
+            f"bundle {a.bundle_json} is not an aidemy_pub bundle.json - it needs meta.topic "
+            "(and, if present, an overview object and a keyTerms list)"
+        )
+    sug = suggest_for_lesson(bundle, top=a.top)
     return sug, [f"keyword: {sug['keyword']}", ""] + [f"{t['score']:5.1f}  {t['title']}" for t in sug["titles"]]
 
 
@@ -258,27 +407,43 @@ def _channels(a: argparse.Namespace) -> Result:
     vids: dict[str, list[Video]] = {}
     info: dict[str, dict] = {}
     if a.load:
-        raw = json.loads(Path(a.load).read_text(encoding="utf-8"))
+        raw = _input_json(a.load, "channels file")
+        shape = f"channels file {a.load} is not a file written by --save"
+        if not isinstance(raw, dict):
+            raise UsageError(shape)
         for c, d in raw.items():
-            vids[c] = [Video(**v) for v in d["videos"]]
+            if (
+                not isinstance(d, dict)
+                or not isinstance(d.get("videos"), list)
+                or not isinstance(d.get("info"), dict | None)
+            ):
+                raise UsageError(f"{shape} (channel {c!r})")
+            try:
+                vids[c] = [Video(**v) for v in d["videos"]]
+            except TypeError:  # not an object, or other fields than a saved video
+                raise UsageError(f"{shape} (a video of channel {c!r})") from None
             info[c] = d.get("info") or {}
     else:
         refs = list(a.refs)
         if a.file:
             refs += [
                 ln.strip()
-                for ln in Path(a.file).read_text(encoding="utf-8").splitlines()
+                for ln in _input_text(a.file, "channel list").splitlines()
                 if ln.strip() and not ln.strip().startswith("#")
             ]
         api = YouTubeAPI()
+        if (refs or a.discover) and not api.key:
+            raise UsageError(NO_KEY)
         if a.discover:
-            refs += [c["id"] for c in api.find_channels(a.discover)]
+            refs += [c["id"] for c in _api_call(api.key, lambda: api.find_channels(a.discover))]
         missing = []
         for r in dict.fromkeys(refs):
             try:
                 chinfo, vs = api.channel_videos(r, limit=a.per_channel)
+            except ImportError:
+                raise UsageError(NO_REQUESTS) from None
             except Exception as e:  # noqa: BLE001 - one bad channel must not stop the others
-                missing.append(f"{r} ({e})")
+                missing.append(f"{r} ({_api_reason(e, api.key)})")
                 continue
             if not chinfo:
                 missing.append(r)
@@ -289,7 +454,10 @@ def _channels(a: argparse.Namespace) -> Result:
             print("not found / skipped: " + ", ".join(missing), file=sys.stderr)
         if a.save:
             payload = {c: {"info": info[c], "videos": [asdict(v) for v in vs]} for c, vs in vids.items()}
-            Path(a.save).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            try:
+                Path(a.save).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            except OSError as e:
+                raise UsageError(f"can't write --save {a.save}: {e.strerror or e}") from None
     res = analyse(vids, info, max_age_days=a.max_age_days, shorts_only=not a.all_videos)
     lines = [
         f"{res['videos']} videos from {res['channels']} channels "
@@ -327,6 +495,9 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], Result]] = {
     "learn": _learn,
     "experiment": _experiment,
     "analyze-batch": _analyze_batch,
+    "ab-pack": _ab_pack,
+    "ab-results": _ab_results,
+    "series": _series,
     "benchmark": _benchmark,
     "calibrate": _calibrate,
     "lesson": _lesson,
@@ -335,7 +506,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], Result]] = {
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="aidemy-seo", description="YouTube SEO analytics and optimisation.")
+    p = OneLineErrorParser(prog="aidemy-seo", description="YouTube SEO analytics and optimisation.")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -430,6 +601,24 @@ def build_parser() -> argparse.ArgumentParser:
     # also accepted after the command; SUPPRESS keeps a global `aidemy-seo --json analyze-batch` from being reset
     ab.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="machine-readable output")
 
+    ap = sub.add_parser(
+        "ab-pack",
+        help="3 titles per video (search, question, why) for YouTube's title Test & Compare, written to a CSV",
+    )
+    ap.add_argument("csv_path", help="CSV (UTF-8) with columns video_id, title, keyword - never written to")
+    ap.add_argument("--out", required=True, help="the CSV to write: video_id, variant, title, length")
+    ap.add_argument("--weights", default=None, help="weights JSON from ab-results: the highest weight comes first")
+
+    ar = sub.add_parser(
+        "ab-results",
+        help="winner per title test (top - second watch time share >= 0.05) and variant weights for ab-pack",
+    )
+    ar.add_argument("csv_path", help="CSV (UTF-8) with columns video_id, variant, watch_time_share - never written to")
+    ar.add_argument("--weights", required=True, help="the weights JSON to write (wins / decided tests)")
+
+    se = sub.add_parser("series", help="group Shorts into series by #Fach + #KlasseN in the title (2+ videos)")
+    se.add_argument("csv_path", help="CSV (UTF-8) with a title column (video_id optional) - never written to")
+
     b = sub.add_parser("benchmark", help="title patterns of the top videos for a keyword (needs YOUTUBE_API_KEY)")
     b.add_argument("keyword")
     b.add_argument("--n", type=int, default=25)
@@ -463,10 +652,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     p = build_parser()
     a = p.parse_args(argv)
+    prog = " ".join(["aidemy-seo", a.cmd, *([a.action] if getattr(a, "action", None) else [])])
     try:
         payload, lines = HANDLERS[a.cmd](a)
     except UsageError as e:
-        p.error(f"{a.cmd}: {e}")  # exits 2 with the usage line, like argparse's own checks
+        p.exit(2, _error_line(prog, str(e)))  # one line, exit 2 - like argparse's own checks
+    except CommandFailed as e:
+        p.exit(1, f"{prog}: error: {e}\n")
+    except OSError as e:  # safety net: any other file problem is one line too, never a traceback
+        where = f" {e.filename}" if e.filename else ""
+        p.exit(2, _error_line(prog, f"can't access{where}: {e.strerror or e}"))
     if a.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2, default=_default))
     else:

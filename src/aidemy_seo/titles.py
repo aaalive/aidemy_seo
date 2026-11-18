@@ -131,14 +131,38 @@ def score_title(title: str, keyword: str = "", *, max_len: int = MAX_TITLE_LEN, 
     return TitleScore(title, round(100.0 * got / total_w, 1), checks)
 
 
+GRADE_RANGE_TEXT_RE = re.compile(r"(\d+)\.?\s*(?:-|–|/|bis|und)\s*(\d+)", re.IGNORECASE)
+GRADE_WORDS_RE = re.compile(r"\b(?:klasse|jahrgangsstufe|jahrgang)\b", re.IGNORECASE)
+
+
+def grade_tag(grade: str = "") -> str | None:
+    """The grade hashtag, by the same rule as `series` (specs/series.md) - a range or a school level
+    is never turned into one grade:
+    "Klasse 10" -> #Klasse10, "Klasse 11-12" / "11/12" / "5 und 6" -> #Klasse11-12 (one tag, never cut
+    to #Klasse11), "Q11" / "Oberstufe" / "Sek II" / "Abitur" -> #Q11 / #Oberstufe / #SekII / #Abitur.
+    No number and no known level -> None."""
+    from .series import LEVEL_RE  # series reads what this writes
+
+    text = (grade or "").strip()
+    m = GRADE_RANGE_TEXT_RE.search(text)
+    if m:
+        return f"#Klasse{m.group(1)}-{m.group(2)}"
+    level = "#" + re.sub(r"[^\wäöüÄÖÜß]", "", GRADE_WORDS_RE.sub("", text))
+    if LEVEL_RE.fullmatch(fold(level)):
+        return level
+    n = re.search(r"\d+", text)
+    return f"#Klasse{n.group(0)}" if n else None
+
+
 def title_tags(subject: str = "", grade: str = "") -> list[str]:
-    """The hashtags every title ends with: #Fach and #KlasseN ("Klasse 10" -> "#Klasse10")."""
+    """The hashtags every title ends with: #Fach and the grade tag ("Klasse 10" -> "#Klasse10";
+    a range or a school level as written, see grade_tag)."""
     tags = []
     if subject:
         tags.append("#" + re.sub(r"[^\wäöüÄÖÜß]", "", subject))
-    m = re.search(r"\d+", grade or "")
-    if m:
-        tags.append(f"#Klasse{m.group(0)}")
+    tag = grade_tag(grade)
+    if tag:
+        tags.append(tag)
     return tags
 
 

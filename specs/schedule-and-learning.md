@@ -29,7 +29,8 @@ being older. `learn` gets a derived metric and an age window so videos are compa
 - `--now` MUST accept ISO 8601 (`2026-11-15`, `2026-11-15T12:00:00Z`,
   `2026-11-15T13:00:00+01:00`). The default is the current UTC time. Tests MUST always pass
   `now` so results don't change with the calendar.
-- Invalid input MUST exit with argparse's usage error (exit code 2) and a clear message,
+- Invalid input MUST exit with argparse's usage error (exit code 2) and a clear message on
+  one line (`PROG: error: MESSAGE (usage: PROG --help)`, no usage block since 2026-11-18),
   never a traceback: an unparseable `--now`, an age that is negative or not finite (`inf`,
   `-inf`, `nan` - `float()` accepts them), or `--min-age` > `--max-age`. `check_age_window()`
   applies the same rule for Python callers.
@@ -100,7 +101,7 @@ being older. `learn` gets a derived metric and an age window so videos are compa
   Test: tests/test_integration_cli.py::test_learn_age_window_cli
 - Given `--now yesterday`, `--min-age -1`, `--min-age inf`, `--max-age=-inf`, `--max-age nan`,
   `--max-age many` or `--min-age 30 --max-age 7`, then the command exits with code 2 and a
-  usage message, not a traceback.
+  one-line usage error, not a traceback.
   Test: tests/test_integration_cli.py::test_learn_rejects_bad_age_arguments
 - Given `learn STATS` with no new options, then the output is the same as before plus the
   coverage line and the "total views favour older videos" hint.

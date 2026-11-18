@@ -13,14 +13,11 @@ day with a bootstrap confidence interval. Spec: specs/experiments.md. Standard l
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import math
-import os
+import os  # noqa: F401 - not used here any more, but tests patch experiments.os.replace (the write is in fileio)
 import random
-import shutil
-import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -28,6 +25,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, NoReturn
 
+from .fileio import write_text_atomic
 from .learn import HELPS_AT, HURTS_AT, VIEWS_PER_DAY, check_age_window, coverage_line, parse_time, videos_for_metric
 from .titles import MAX_TITLE_LEN, build_title, title_tags
 
@@ -123,29 +121,19 @@ def load_ledger(path: str | Path, *, must_exist: bool = False) -> dict[str, Any]
         return empty_ledger()
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
+    except OSError as e:  # a directory, no permission, ...
+        raise ExperimentError(f"can't read ledger {p}: {e.strerror or e}") from None
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
         raise ExperimentError(f"ledger {p} is not valid JSON ({e}) - the file was not changed") from None
     return _validate(data, p)
 
 
 def save_ledger(path: str | Path, ledger: dict[str, Any]) -> None:
-    """Atomic: write a temp file next to the ledger, then os.replace - a crash never leaves half a file.
-    An existing ledger keeps its file mode; a new one is private to the user (mkstemp: 0600)."""
-    p = Path(path)
-    text = json.dumps(ledger, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".{p.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        if p.exists():
-            shutil.copymode(p, tmp)
-        os.replace(tmp, p)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+    """Atomic (fileio.write_text_atomic): temp file next to the ledger, then os.replace - a crash never
+    leaves half a file. An existing ledger keeps its file mode; a new one is private to the user (0600)."""
+    write_text_atomic(
+        path, json.dumps(ledger, ensure_ascii=False, indent=2, sort_keys=True) + "\n", new_file_mode=0o600
+    )
 
 
 def _norm_title(title: object) -> str:

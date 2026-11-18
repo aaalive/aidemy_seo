@@ -73,7 +73,9 @@ Module: `src/aidemy_seo/experiments.py` (standard library only: `hashlib`, `json
   or refused assign MUST leave the existing file byte-for-byte unchanged and no temp file
   behind. Output is UTF-8, `ensure_ascii=False`, `indent=2`, `sort_keys=True` (readable,
   stable diffs). An existing ledger keeps its file mode; a new one is private (0600), because
-  it holds channel plans.
+  it holds channel plans. Since 2026-11-18 the write goes through the shared
+  `fileio.write_text_atomic(..., new_file_mode=0o600)`, the same code as the A/B outputs, which
+  use normal permissions instead.
 - A ledger that is not valid JSON, has a `version` other than 1, or a missing or wrong
   structure MUST be a clear error, never overwritten.
 - `--now` (ISO 8601, same parsing as `learn`) sets `created_at` / `assigned_at`, so tests
@@ -150,7 +152,8 @@ that back it up.
 - An unknown experiment name MUST be an error that lists the experiments in the ledger.
 
 ### CLI errors
-- Bad input MUST exit with code 2 and a one-line message on stderr (after the usage line),
+- Bad input MUST exit with code 2 and a one-line message on stderr (since 2026-11-18 the only
+  line: `PROG: error: MESSAGE (usage: PROG --help)`, no usage block),
   no traceback, ledger unchanged. This covers: an unknown arm, fewer than 2 arms, changed
   arms, a duplicate title, an empty key or keyword, a bad or missing ledger, an unknown
   experiment, a bad `--now` or age value (incl. `inf`/`nan`), `--confidence` not strictly
@@ -193,6 +196,9 @@ that back it up.
 - Given a successful assign, then no temp file is left in the folder and the JSON is
   sorted, indented and keeps "ä" unescaped.
   Test: tests/test_experiments.py::test_ledger_write_is_atomic_and_readable
+- Given umask 022 and a new ledger, then its mode is 0600 (the A/B outputs would be 0644), and
+  `save_ledger` calls `fileio.write_text_atomic` with `new_file_mode=0o600`.
+  Test: tests/test_fileio.py::test_new_ledger_is_private_through_the_shared_writer
 
 ### Report
 - Given 2 arms with 3 published videos each, then both arms say "not enough data (need 5

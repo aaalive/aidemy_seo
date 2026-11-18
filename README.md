@@ -22,7 +22,7 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[http,dev]"
 git init && git config core.hooksPath .githooks   # verify runs before every commit
-scripts/verify.sh             # expected: verify: OK (132 tests, coverage >= 85%)
+scripts/verify.sh             # expected: verify: OK (261 tests, coverage >= 85%)
 ```
 
 Next time: `cd ~/Documents/dev/aidemy_seo && . .venv/bin/activate`.
@@ -32,6 +32,10 @@ Next time: `cd ~/Documents/dev/aidemy_seo && . .venv/bin/activate`.
 ## Features and how to use them
 
 Add `--json` right after `aidemy-seo` for machine-readable output (e.g. `aidemy-seo --json schedule ...`).
+Errors are one short line on stderr, never a Python traceback (`specs/cli-errors.md`): exit code 2
+for input you can fix (`aidemy-seo calibrate: error: can't read calibration CSV x.csv: No such file or
+directory (usage: aidemy-seo calibrate --help)`), exit code 1 when a YouTube API request fails. The
+API key is never printed.
 
 ### 1. Keyword research - which words people really search
 
@@ -67,7 +71,9 @@ aidemy-seo title Gentechnik --generate --subject Biologie --grade "Klasse 10"
 ```
 
 Ranked candidates from honest templates (no claims the video doesn't make), always within
-66 characters. Titles that keep both `#Fach` and `#KlasseN` rank higher.
+66 characters. Titles that keep both `#Fach` and `#KlasseN` rank higher. A grade range or school
+level stays as it is (`--grade "Klasse 11-12"` gives `#Klasse11-12`, `--grade Q11` gives `#Q11`),
+never one made-up grade.
 
 ### 4. Description check
 
@@ -346,6 +352,111 @@ Reads a CSV (UTF-8; `,`, `;` or tab, detected from the header) with the columns 
 
 Don't commit real channel exports.
 
+### 13. Title A/B tests for YouTube "Test & Compare"
+
+YouTube Studio tests up to 3 titles on the **same** video and reports each title's share of the
+watch time. Topic, week and age are the same for every title, so the test is fair. Offline, 0 API
+units. Spec: `specs/ab-testing.md` · decision: `docs/adr/0007-title-ab-packs-fixed-margin-win-rate-weights.md`.
+
+**Step 1 - write the titles** (CSV with `video_id`, `title` = the current title, `keyword`):
+
+```bash
+aidemy-seo ab-pack tests/fixtures/titles_to_fix.csv --out ab_pack.csv
+aidemy-seo ab-pack tests/fixtures/titles_to_fix.csv --out ab_pack.csv --weights ab_weights.json   # after step 2
+```
+```text
+wrote 27 titles for 10 of 10 videos to ab_pack.csv (0 skipped, 3 variants dropped)
+order: why 0.75, search 0.25, question 0.20 (highest weight first, from ab_weights.json, 5 decided tests)
+TITLES
+video_id      variant   length  title
+v01           why           44  Warum Worttrennung? Einfach erklärt #Deutsch
+v01           search        60  Worttrennung einfach erklärt – das musst du wissen! #Deutsch
+v01           question      46  Worttrennung – kannst du es erklären? #Deutsch
+v02           why           52  Warum Raubtiere? Einfach erklärt #Biologie #Klasse11
+v02           question      54  Raubtiere – kannst du es erklären? #Biologie #Klasse11
+...
+  line 3: search variant dropped - the search title is 68 characters with #Biologie #Klasse11 (max 66) - series hashtags are never dropped; testing why, question
+```
+
+| Rule | What happens |
+|---|---|
+| Variants | `search` = {x} einfach erklärt – das musst du wissen! · `question` = {x} – kannst du es erklären? · `why` = Warum {x}? Einfach erklärt ({x} = keyword) |
+| Length | at most 66 characters, a title is never cut |
+| Hashtags | from the current title, each once, at most 2. Grade tags (`#Klasse11`, `#Klasse11-12`, `#Q11`) and the `#Fach` of a series are never dropped, so the video stays in its series (feature 14) |
+| Too long | only that variant is dropped (with a warning) and the video is tested with 2 titles. Skipped only if fewer than 2 fit |
+| Order | search, question, why. With `--weights` from **5+ decided tests**: highest weight first; a variant with "not enough info" keeps its place |
+| Output | `video_id, variant, title, length`, same delimiter as the input, normal file permissions |
+| Bad rows | skipped with a warning naming the line (no `video_id` / keyword / title, repeated `video_id`, wrong number of fields) |
+
+**Step 2 - read the results** (CSV with `video_id`, `variant`, `watch_time_share` from Studio; adding a
+`watch_time_share` column to the `ab-pack` file works too):
+
+```bash
+aidemy-seo ab-results tests/fixtures/ab_results.csv --weights ab_weights.json
+```
+```text
+8 videos in tests/fixtures/ab_results.csv: 5 winners, 2 inconclusive, 1 not evaluated (winner = top share - second share >= 0.05)
+TESTS
+video_id      result        top       share  second    share  margin
+v02           winner        why       0.580  question  0.420   0.160
+v04           inconclusive  why       0.520  question  0.480   0.040
+v05           winner        search    0.450  question  0.400   0.050
+v06           winner        why       0.455  search    0.335   0.120
+v07           inconclusive  question  0.520  why       0.480   0.040
+v08           winner        why       0.550  search    0.250   0.300
+v10           winner        question  0.620  search    0.380   0.240
+NOT EVALUATED
+  v09 (line 14): only 1 variant (search) - a test compares 2 or 3
+WARNINGS
+  (none)
+WEIGHTS (wins / decided tests the variant was in, from 3 tests on; 5 decided tests, written to ab_weights.json)
+  search    0.25  (1 of 4)
+  question  0.20  (1 of 5)
+  why       0.75  (3 of 4)
+```
+
+| Rule | What happens |
+|---|---|
+| Winner | top share - second share >= **0.05**, otherwise inconclusive (compared exactly: 0.45 vs 0.40 is a winner) |
+| Shares | `0.42`, `0,42` or `42%` |
+| Weight | wins ÷ decided tests **the variant was in** (a test without the variant is no loss), 2 decimals |
+| Too few tests | a variant needs **3** decided tests, otherwise "not enough info" (`null` in the file), not 0. `ab-pack` uses the weights from **5** decided tests in total |
+| Not evaluated | a broken row, a variant twice, only 1 variant, or shares adding up to more than 1.01 (100% + rounding) - never guessed |
+| Weights file | `{"decided": 5, "weights": {"search": 0.25, "question": 0.2, "why": 0.75}}`, the `--weights` input of step 1 |
+
+**Input files are never overwritten:** an `--out` / `--weights` that is an input file (also via `./`,
+a symlink or a hard link) is refused. Outputs are written atomically.
+
+### 14. Shorts series (playlists) from #Fach + #KlasseN
+
+```bash
+aidemy-seo series tests/fixtures/titles_to_fix.csv
+```
+```text
+2 series in tests/fixtures/titles_to_fix.csv: 5 of 10 videos in a series, 5 not sorted, 0 skipped
+SERIES
+Biologie Klasse 11 (3 videos)
+  line   3  v02           Warum es immer weniger Raubtiere gibt 🦁 #Biologie #Klasse11
+  line   4  v03           Neobiota & Selbstregulation in Ökosystemen : Das musst du wissen! #Biologie #Klasse11
+  line   7  v06           Atmung & Gärung: Das musst du wissen! #Biologie #Klasse11
+Ethik Klasse 5 (2 videos)
+  line   5  v04           Warum wir nicht alleine leben koennen #Ethik #Klasse5
+...
+NOT SORTED
+  line   2  v01           Die Worttrennung, die in jeder Klassenarbeit vorkommt 📚 #Deutsch  - no #KlasseN hashtag
+  ...
+```
+
+| Rule | What happens |
+|---|---|
+| Input | CSV with `title` (`video_id` optional) - the `ab-pack` and `analyze-batch` CSVs work as they are. Writes no file |
+| Series | same `#Fach` + same `#KlasseN`, 2 or more videos -> "Fach Klasse N" (case and umlauts don't matter) |
+| Subject | the first hashtag that is no grade tag, no school level and not `#Shorts` |
+| Not sorted | every other video, with the reason: no `#KlasseN`, 2 grades, no subject, only video of its group |
+| Never guessed | a grade range (`#Klasse11-12`) or a school level (`#Q11`, `#Oberstufe`, `#SekII`, `#Abitur`) is not turned into a grade: without a `#KlasseN` the video is not sorted, with the reason. A level is never the subject |
+
+Spec: `specs/series.md` · decision: `docs/adr/0008-series-from-title-hashtags.md`.
+
 ---
 
 ## Use from Python (how aidemy_pub calls it)
@@ -397,6 +508,10 @@ print(r.verdict, r.winner)            # r.to_json() = the --json output
 4. **Experiments:** the integration test `test_experiment_assign_and_report_cli` runs the whole
    loop (assign 17 videos -> publish -> report). To try it by hand, assign into a scratch
    ledger (`/tmp/experiments.json`) and report against a copy of your stats file.
+5. **A/B packs and series:** `tests/test_integration_ab_series.py` runs the whole loop
+   (`ab-results` on `tests/fixtures/ab_results.csv` -> weights -> `ab-pack --weights`) and `series`,
+   and checks that no input file changes. By hand: run features 13 and 14 on the fixtures, with
+   `--out` / `--weights` in a scratch folder.
 
 ---
 
@@ -410,7 +525,7 @@ This repo is set up so an AI coding agent can work in it safely and correct itse
 | Permissions + hooks | `.claude/settings.json` | Allows tests/lint, asks before commit/push/install, denies secrets, curl, `rm -rf`; runs `verify --fast` after every edit and the full verify when the agent stops |
 | Skills | `.claude/skills/` | `spec-first-feature` (ticket -> spec -> tests -> code -> verify) and `verify` (fix loop) |
 | Specs | `specs/*.md` | What each feature must do; every scenario names its test. `tests/test_specs.py` fails if a spec and the tests drift apart |
-| Decisions | `docs/adr/` | Why: stdlib core, autocomplete as demand signal, cross-channel normalisation, MIT, age-fair views per day |
+| Decisions | `docs/adr/` | Why: stdlib core, autocomplete as demand signal, cross-channel normalisation, MIT, age-fair views per day, batch rubric, title A/B packs, series from hashtags |
 | Verification | `scripts/verify.sh` | Local CI: ruff lint + format, mypy, pytest with 85% coverage gate |
 | Git hook | `.githooks/pre-commit` | Runs verify before every commit: `git config core.hooksPath .githooks` |
 | CI | `.github/workflows/ci.yml` | Same verify on Python 3.10 / 3.12 / 3.13 for every push and PR |
@@ -431,6 +546,9 @@ src/aidemy_seo/
   learn.py         title-feature lift on your own videos; age-fair views_per_day + age window
   experiments.py   title template experiments: hash assignment, JSON ledger, bootstrap report
   batch.py         batch CSV analysis: per-row score, duplicate titles, ranking
+  abtest.py        title A/B packs (search/question/why) + Test & Compare results -> variant weights
+  series.py        Shorts series from #Fach + #KlasseN title hashtags
+  fileio.py        shared CSV reader (batch, abtest, series), atomic file write (abtest, experiment ledger), same-file check
   benchmark.py     title patterns of top videos
   youtube_api.py   minimal read-only YouTube Data API client
   competitors.py   other channels: per-channel normalised posting times + title styles
@@ -454,6 +572,14 @@ specs/  docs/adr/  docs/quality.md  scripts/verify.sh  .claude/  .githooks/  .gi
   count as the same word. A topic that is also a hook word ("Wahrheit", "Mythos") doesn't count.
   The tag length adds up the tag characters only. YouTube also counts commas and quotes, so a
   total just under 500 can still be too long. Only exact duplicate titles are found.
+- The A/B winner rule (top - second >= 0.05) is a fixed threshold, not a significance test:
+  Studio's results have no view counts, so a small video can win by chance. 3 tests per variant
+  and 5 in total are small samples - read `(wins of tests)` next to every weight.
+- A long keyword plus the series hashtags can leave no room for the `search` title (v02-v04 in
+  the example): that video tests question + why only, so `search` collects tests more slowly.
+- `series` trusts the first subject hashtag (`#Bio` and `#Biologie` are two series) and knows a
+  fixed list of school levels (`#Kursstufe` or `#J1` in first place would be read as a subject).
+  It suggests playlists; it does not create them.
 
 ## Licence
 

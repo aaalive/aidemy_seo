@@ -6,6 +6,7 @@ Track these numbers over time; a PR should never make them worse.
 |---|---|---|---|---|
 | 2026-11-13 | 36 (+2 live) | 93.7% (gate 85%) | 55% (1585 / 2863) | first run |
 | 2026-11-15 | 104 (+1 skipped, +2 live) | 96.88% (gate 85%) | not re-run (see below) | age-fair `learn` + `experiment assign/report` |
+| 2026-11-18 | 261 (+2 live) | 98.43% (gate 85%) | not re-run; 85/85 planted bugs caught (see below) | `ab-pack`, `ab-results`, `series` (+ review changes), one-line CLI errors for every command, cleanup, grade ranges / school levels (series, ab-pack, title generator) |
 
 ## Surviving mutants by module (2026-11-13)
 | Module | Survived | Priority |
@@ -70,3 +71,64 @@ by hand, one at a time, in a throwaway copy, and the tests run against each one:
 | the 2 fixes (day length, inf/nan) | 3 | 3 | |
 
 Next: run `mutmut run` on `learn` and `experiments` and add them to the table above.
+
+## 2026-11-18: title A/B packs, Test & Compare results, Shorts series
+
+Specs: `specs/ab-testing.md`, `specs/series.md`. Decisions: `docs/adr/0007-title-ab-packs-fixed-margin-win-rate-weights.md`,
+`docs/adr/0008-series-from-title-hashtags.md`.
+
+### What was built
+| Module | Change |
+|---|---|
+| `abtest.py` (new) | `ab-pack`: 3 titles per video from `TEMPLATES[1]/[0]/[3]` via `build_title` (66 chars), title hashtags without repeats (max 2), series hashtags (`#KlasseN`, `#Fach` of a series) never dropped, a variant that can't fit 66 chars is dropped with a warning (video kept while 2 titles fit), order by `--weights` from 5 decided tests; `ab-results`: exact `Decimal` shares, winner at margin >= 0.05, never evaluates a video on partial data, weights = wins / decided tests the variant was in, "not enough info" (null, keeps its default place) below 3 tests per variant (half up, 2 decimals) |
+| `series.py` (new) | series "Fach Klasse N" from `#Fach #KlasseN` (2+ videos), the rest "not sorted" with a reason |
+| `fileio.py` (new) | the batch CSV reader with the required columns as a parameter; `write_text_atomic` (the one atomic writer; new files get `new_file_mode` minus the umask, default 0666), `same_file` (input files are never overwritten); `CsvWarning.skipped_row` keyword-only |
+| `batch.py` | refactor only: reads through `fileio.read_table` (behaviour and messages unchanged, all existing tests pass unchanged) |
+| `titles.py` | `title_tags()` / new `grade_tag()`: a grade range ("Klasse 11-12" -> `#Klasse11-12`) or school level ("Q11" -> `#Q11`) is never turned into one `#KlasseN` - same rule as `series` (single grades unchanged, all existing tests pass unchanged) |
+| `experiments.py` | refactor only: `save_ledger` writes through `fileio.write_text_atomic(..., new_file_mode=0o600)` - a new ledger stays private (all existing tests pass unchanged) |
+| `cli.py` | `ab-pack`, `ab-results`, `series`; every error of every command is one line (files read via `fileio.read_input_*`, shape checks, `CommandFailed` exit 1 for failed API requests with the key hidden) (`OneLineErrorParser`, `PROG: error: MESSAGE (usage: PROG --help)`), exit 2, nothing written |
+
+Standard library only, no new dependency. No `pragma: no cover`, no `type: ignore`. One
+suppression: `import os  # noqa: F401` in `experiments.py`. The module no longer uses `os`, but
+the existing test `test_ledger_write_is_atomic_and_readable` patches `experiments.os.replace` to
+simulate a crash, and existing tests are not changed. The patch also hits the shared writer, so
+the test still checks the real write. No existing test or fixture was changed.
+
+### Tests
+| File | Tests | What |
+|---|---|---|
+| `tests/test_abtest.py` (new) | 22 | templates/hashtags/66-char rule, series hashtags never dropped, v02-v04 keep question + why (search dropped with a warning), bad rows, weights order (min 5 decided) and validation, normal file permissions, input protection (path, `..`, symlink, hard link), crash while writing, share parsing, 0.05 boundary (float trap), half-up rounding, partial data never evaluated |
+| `tests/test_series.py` (new) | 8 | subject/grade rules, grade ranges and school levels never guessed, real titles, grouping and sort, duplicate ids, JSON/text |
+| `tests/test_title_tags.py` (new) | 17 | single grades unchanged; 6 range and 8 level spellings stay range / level and `series` reports them; unknown grade text gets no tag; `optimize_title`, `experiment assign` and `title --generate` keep them |
+| `tests/test_fileio.py` (new) | 3 | `write_text_atomic` modes (0644 default, 0600 on request, existing mode kept, bytes as given), a new ledger is 0600 through the shared writer, `skipped_row` keyword-only |
+| `tests/test_integration_errors.py` (new) | 53 | one test per command (19 test functions): missing file, folder, Latin-1, broken / wrong-shaped JSON, bad score, no API key, no `requests`, offline, timeout, HTTP 403 - always one line, key never printed; safety net; good input unchanged |
+| `tests/test_integration_ab_series.py` (new) | 23 | the 3 commands end to end, results -> weights -> pack loop, 13 error cases, 6 one-line error checks (incl. `learn`, `experiment`) exit 2 with every file unchanged, installed executable |
+| `tests/fixtures/ab_results.csv` (new) | - | 5 winners (= the minimum for weights), 2 inconclusive, exactly 0.05, percentages, 2-title tests (v02/v04 as ab-pack makes them), 1 variant only |
+
+### Planted bugs (throwaway copy, one at a time, `PYTHONDONTWRITEBYTECODE=1`)
+85 of 85 caught. Title generator: old first-number rule back, range cut to its first grade, levels not
+recognised, en dash / "bis" / "und" missed, "5./6. Klasse" missed, "Jahrgangsstufe Q12" missed.
+Grade ranges / levels: range cut to `#Klasse11` again, level taken as subject,
+range counted as grade, range mapped to its first grade, `Q` + any digits (first survived: no test
+pinned 1-2 digits - added), level regex too wide, unhelpful level reason, `ab-pack` cutting the range,
+`ab-pack` dropping ranges/levels. One-line errors for every command: the reported `calibrate` crash back, a bad
+score crashing, the API key printed (first survived: no test had an error text with the key -
+added), long network message, no key check, no safety net, bundle / stats shape not checked,
+network failure as exit 2, non-UTF-8 traceback, ledger folder crashing. Cleanup (shared writer, keyword-only flag): ledger mode not passed (new ledger
+0644), `new_file_mode` ignored, `skipped_row` positional again, existing mode not kept, temp file
+left after a crash. Fifth review (below 3 tests = unknown, not 0): unknown as 0 again, unknown
+ranked last, all known ranked ignoring the unknown's place, `null` refused in the weights file,
+"not enough info" not shown, a missing variant read as 0. Fourth review (3 tests per variant, one-line errors): minimum 2 / 4 instead of 3,
+no minimum, reason not shown, argparse usage block back, handler errors with the usage block, no
+usage pointer, wrong command name in the error. Third review (weight = wins / decided tests the variant was in): old denominator
+(all decided tests), inconclusive tests counted, presence ignored, no evidence -> 1.0, `decided_with`
+missing from JSON, old denominator in the text, 5-test minimum per variant instead of total,
+banker's rounding. Second review (variant dropped instead of video skipped): need 3 titles again,
+1-title video packed, any dropped variant skips the video, dropped variant not warned / not in
+the report, 66 limit loosened, videos counted as rows / 3. First review: `#KlasseN` or the series `#Fach` droppable, series tags not
+picked first, kept tags dropped anyway, weights applied below 5 / at 4 decided, old flat weights
+format accepted, negative `decided`, new files 0600, existing mode not kept. First version: `>` instead of `>=`, float shares, 3 hashtags, no repeat check, lowest weight
+first, banker's rounding, inconclusive counted as decided, broken row ignored, no share-sum check,
+`--out` over the weights file, wrong template, output ignores the input delimiter, duplicate
+video packed, hard link not detected, 1-video series, grade sorted as text, duplicate video
+makes a fake series, `#Shorts` as subject.
