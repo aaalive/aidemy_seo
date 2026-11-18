@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Clean copy of the committed tree (HEAD) for sandboxed AI evaluations (Taiga).
-#   scripts/export_clean.sh [out.zip]          build dist/aidemy_seo_clean.zip, then audit it
-#   scripts/export_clean.sh --verify [out.zip] also install it in a temp venv and run verify.sh
+#   scripts/export_clean.sh [out.zip]             build dist/aidemy_seo_clean.zip, audit it, install it in a
+#                                                 temp venv and run scripts/verify.sh on the copy (default)
+#   scripts/export_clean.sh --no-verify [out.zip] skip the test run (audit only)
 #   scripts/export_clean.sh --check <zip|dir>  audit ANY zip or folder (e.g. one zipped by hand)
 # The audit fails (exit 1) on: .git, agent/IDE files, build/cache output, .env, real channel
 # handles, secrets or emails, references to removed files, a missing .gitignore, verify.sh not
@@ -85,7 +86,8 @@ if [ "${1:-}" = "--check" ]; then
   [ -n "${2:-}" ] || { echo "usage: scripts/export_clean.sh --check <zip|dir>" >&2; exit 2; }
   audit "$(unpack "$2")"; exit $?
 fi
-verify=0; [ "${1:-}" = "--verify" ] && { verify=1; shift; }
+verify=1
+case "${1:-}" in --no-verify) verify=0; shift ;; --verify) shift ;; esac
 out="${1:-dist/aidemy_seo_clean.zip}"
 
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
@@ -125,8 +127,12 @@ chmod +x "$r/scripts/verify.sh"
 audit "$r" || { echo "export: refused - fix the problems above" >&2; exit 1; }
 if [ "$verify" = 1 ]; then
   echo "export: installing the copy in a temp venv and running verify.sh ..."
-  python3 -m venv "$tmp/venv" && "$tmp/venv/bin/pip" install -q -e "$r[dev]" >/dev/null 2>&1
-  (cd "$r" && PATH="$tmp/venv/bin:$PATH" bash scripts/verify.sh 2>&1 | tail -1)
+  python3 -m venv "$tmp/venv" && "$tmp/venv/bin/pip" install -q -e "$r[dev]" >/dev/null 2>&1 \
+    || { echo "export: refused - pip install -e '.[dev]' fails on the clean copy" >&2; exit 1; }
+  if ! (cd "$r" && PATH="$tmp/venv/bin:$PATH" bash scripts/verify.sh >"$tmp/verify.log" 2>&1); then
+    tail -20 "$tmp/verify.log" >&2; echo "export: refused - verify.sh fails on the clean copy" >&2; exit 1
+  fi
+  tail -1 "$tmp/verify.log"
   rm -rf "$r"/src/*.egg-info "$r/.coverage" "$r/.pytest_cache" "$r/.mypy_cache" "$r/.ruff_cache"
   find "$r" -name __pycache__ -prune -exec rm -rf {} +
   audit "$r" >/dev/null || { echo "export: verify left build output behind" >&2; exit 1; }
