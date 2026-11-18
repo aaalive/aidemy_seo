@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Clean copy of the committed tree (HEAD) for sandboxed AI evaluations (Taiga).
-#   scripts/export_clean.sh [out.zip]             build dist/aidemy_seo_clean.zip, audit it, install it in a
-#                                                 temp venv and run scripts/verify.sh on the copy (default)
-#   scripts/export_clean.sh --no-verify [out.zip] skip the test run (audit only)
+#   scripts/export_clean.sh [out.zip]          build dist/aidemy_seo_clean.zip and audit it (no test run)
+#   scripts/export_clean.sh --verify [out.zip] also install the copy in a temp venv and run verify.sh
+# scripts/verify.sh itself is always in the zip.
 #   scripts/export_clean.sh --check <zip|dir>  audit ANY zip or folder (e.g. one zipped by hand)
 # The audit fails (exit 1) on: .git, agent/IDE files, build/cache output, .env, real channel
 # handles, secrets or emails, references to removed files, a missing .gitignore, verify.sh not
@@ -86,8 +86,7 @@ if [ "${1:-}" = "--check" ]; then
   [ -n "${2:-}" ] || { echo "usage: scripts/export_clean.sh --check <zip|dir>" >&2; exit 2; }
   audit "$(unpack "$2")"; exit $?
 fi
-verify=1
-case "${1:-}" in --no-verify) verify=0; shift ;; --verify) shift ;; esac
+verify=0; [ "${1:-}" = "--verify" ] && { verify=1; shift; }
 out="${1:-dist/aidemy_seo_clean.zip}"
 
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
