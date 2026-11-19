@@ -121,6 +121,27 @@ v.write_text(v.read_text().replace(
     "# the Claude Code hooks (.claude/settings.json) and GitHub Actions. Green = done.", "# CI. Green = done."))
 s = r / "specs" / "README.md"
 s.write_text(s.read_text().replace(" (see `.claude/skills/spec-first-feature`)", ""))
+# No aidemy_pub content and no private analytics in the upload: the lesson bundle's texts and the
+# vidIQ scores are swapped for made-up ones (same shape, so the tests still pass).
+import json
+fx = r / "tests" / "fixtures"
+b = fx / "bundle_biologie_kl10_gentechnik.json"
+d = json.loads(b.read_text(encoding="utf-8"))
+for i, k in enumerate(d.get("keyTerms") or []):
+    k["preciseDefinition"] = f"Beispieltext {i + 1}: kurze Definition von {k['term']}."
+d["coreTopics"] = [f"Beispielthema {i + 1}" for i in range(len(d.get("coreTopics") or []))]
+d = {"_comment": "MADE-UP example in the shape of a lesson bundle.json - not real lesson content", **d}
+b.write_text(json.dumps(d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+v = fx / "vidiq_scores_2026-11-12.csv"
+made_up = iter([81, 79, 70, 66, 61, 64, 58])   # question row stays 79: test_calibrate checks the shape mean
+v.write_text("\n".join([ln if j == 0 else ln.rsplit(";", 1)[0] + f";{next(made_up)}"
+                        for j, ln in enumerate(v.read_text(encoding="utf-8").splitlines())]) + "\n", encoding="utf-8")
+t = r / "tests" / "test_aidemy_seo.py"
+t.write_text(t.read_text(encoding="utf-8").replace(
+    "Tests use real AiDemy data where it exists (a real lesson bundle, real vidIQ scores seen in\n"
+    "YouTube Studio on 2026-11-12, real titles and description text)",
+    "Tests use made-up data in the shape of real creator data (an example lesson bundle, example\n"
+    "vidIQ-style scores, public video titles and description text)"), encoding="utf-8")
 PY
 chmod +x "$r/scripts/verify.sh"
 audit "$r" || { echo "export: refused - fix the problems above" >&2; exit 1; }
